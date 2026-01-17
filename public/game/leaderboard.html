@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Global Rankings - SG Xiangqi</title>
+    <style>
+        :root { --primary: #cd3333; --dark: #0a0a0a; --bg: #05080c; --gold: #f1c40f; --card-bg: #111; --row-alt: #0d0d0d; }
+        body { font-family: 'Segoe UI', Tahoma, sans-serif; background: var(--bg); margin: 0; color: white; min-height: 100vh; overflow-x: hidden; }
+        
+        header { 
+            background: var(--primary); color: white; padding: 15px 30px; 
+            display: flex; justify-content: space-between; align-items: center; 
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5); position: sticky; top: 0; z-index: 100;
+        }
+        .header-left { display: flex; align-items: center; gap: 15px; }
+        .back-btn { background: rgba(0,0,0,0.3); border: none; color: white; padding: 10px 15px; border-radius: 8px; cursor: pointer; font-weight: bold; transition: 0.2s; }
+        .back-btn:hover { background: rgba(0,0,0,0.5); transform: translateX(-5px); }
+
+        .container { max-width: 1000px; margin: 40px auto; padding: 0 20px; }
+
+        .hall-header { text-align: center; margin-bottom: 50px; }
+        .hall-header h1 { font-size: 3rem; color: var(--gold); letter-spacing: 5px; margin: 0; font-weight: 900; text-transform: uppercase; }
+        .hall-header p { color: #64748b; margin-top: 10px; font-weight: 500; letter-spacing: 1px; }
+
+        /* Navigation Tabs */
+        .rank-tabs { display: flex; justify-content: center; gap: 20px; margin-bottom: 40px; }
+        .tab-trigger { 
+            background: #111; border: 2px solid #222; color: #555; 
+            padding: 15px 40px; border-radius: 40px; cursor: pointer; 
+            font-weight: 900; letter-spacing: 1px; transition: 0.3s;
+        }
+        .tab-trigger.active { background: var(--primary); color: white; border-color: transparent; box-shadow: 0 10px 20px rgba(205, 51, 51, 0.3); }
+
+        /* The Leaderboard Table */
+        .leaderboard-card { background: var(--card-bg); border-radius: 24px; border: 1px solid #222; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
+        
+        .table-head { background: #000; padding: 20px 30px; display: grid; grid-template-columns: 80px 1fr 120px 150px; border-bottom: 2px solid #222; }
+        .table-head span { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 2px; color: #555; font-weight: 800; }
+
+        .player-row { 
+            padding: 20px 30px; display: grid; grid-template-columns: 80px 1fr 120px 150px; 
+            align-items: center; border-bottom: 1px solid rgba(255,255,255,0.03);
+            transition: 0.2s;
+        }
+        .player-row:nth-child(even) { background: var(--row-alt); }
+        .player-row:hover { background: #1a1a1a; transform: scale(1.01); z-index: 10; position: relative; }
+        .player-row.me { border-left: 4px solid var(--gold); background: rgba(241, 196, 15, 0.05); }
+
+        .rank-col { font-weight: 900; font-size: 1.2rem; color: #444; }
+        .rank-1 { color: var(--gold); text-shadow: 0 0 10px rgba(241, 196, 15, 0.3); }
+        .rank-2 { color: #bdc3c7; }
+        .rank-3 { color: #cd7f32; }
+
+        .identity-col { display: flex; align-items: center; gap: 15px; }
+        .mini-avatar { width: 45px; height: 45px; border-radius: 50%; overflow: hidden; border: 2px solid #333; background: #000; }
+        .mini-avatar img { width: 100%; height: 100%; object-fit: cover; }
+        .player-name { font-weight: 800; font-size: 1rem; color: #eee; }
+        .player-country { font-size: 0.65rem; color: #555; text-transform: uppercase; display: block; margin-top: 2px; }
+
+        .stat-col { font-family: 'Courier New', Courier, monospace; font-weight: bold; font-size: 1.1rem; color: var(--gold); }
+        .collection-col { display: flex; align-items: center; gap: 8px; color: #888; font-weight: bold; }
+        .collection-tile { font-size: 1.2rem; }
+
+        /* Empty State */
+        .loading-state { padding: 100px; text-align: center; color: #444; font-weight: bold; letter-spacing: 2px; }
+    </style>
+</head>
+<body>
+
+<header>
+    <div class="header-left">
+        <button class="back-btn" onclick="window.location.href='../lobby.html'">← LOBBY</button>
+        <h1 style="margin:0; font-size: 1rem; letter-spacing: 1px;">SG XIANGQI PRO</h1>
+    </div>
+</header>
+
+<div class="container">
+    <div class="hall-header">
+        <h1>Hall of Valour</h1>
+        <p>Ranking the strongest generals and greatest collectors across the river.</p>
+    </div>
+
+    <div class="rank-tabs">
+        <button class="tab-trigger active" id="tab-elo" onclick="switchSort('elo')">Grandmasters (ELO)</button>
+        <button class="tab-trigger" id="tab-collection" onclick="switchSort('collection')">Collectors (Tiles)</button>
+    </div>
+
+    <div class="leaderboard-card">
+        <div class="table-head">
+            <span>Rank</span>
+            <span>Identity</span>
+            <span>Rating</span>
+            <span>Inventory</span>
+        </div>
+        <div id="leaderboard-list">
+            <div class="loading-state">SYNCHRONIZING GLOBAL DATA...</div>
+        </div>
+    </div>
+</div>
+
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, collectionGroup, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    const firebaseConfig = { apiKey: "AIzaSyDq_LECOrc4SY90SyDsBQGmwl-YnUNFIj8", authDomain: "xiangqi-sq.firebaseapp.com", projectId: "xiangqi-sq", storageBucket: "xiangqi-sq.firebasestorage.app", messagingSenderId: "351923336298", appId: "1:351923336298:web:e7278ea095ba085ac4935b" };
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    const appId = "sg-xiangqi";
+
+    let players = [];
+    let currentSort = 'elo';
+    let currentUser = null;
+
+    onAuthStateChanged(auth, (user) => {
+        currentUser = user;
+        loadAllProfiles();
+    });
+
+    async function loadAllProfiles() {
+        try {
+            // Fetching all "data" documents within the "profile" collection group
+            // This is allowed under Rule 2 if we sort manually in memory
+            const querySnapshot = await getDocs(collectionGroup(db, 'profile'));
+            players = [];
+            
+            querySnapshot.forEach((doc) => {
+                const data = doc.data();
+                // Filter by App ID to ensure multi-tenancy isolation
+                // Assuming profiles are at: /artifacts/{appId}/users/{userId}/profile/data
+                if (doc.ref.path.includes(appId)) {
+                    players.push({
+                        ...data,
+                        collectionCount: data.mahjongCollection ? data.mahjongCollection.length : 0,
+                        id: data.uid
+                    });
+                }
+            });
+
+            renderLeaderboard();
+        } catch (err) {
+            console.error("Leaderboard Load Error:", err);
+            document.getElementById('leaderboard-list').innerHTML = "<div class='loading-state' style='color:var(--primary)'>Failed to connect to the Hall of Valour.</div>";
+        }
+    }
+
+    function renderLeaderboard() {
+        const container = document.getElementById('leaderboard-list');
+        container.innerHTML = "";
+
+        // Manual Sort based on active tab
+        if (currentSort === 'elo') {
+            players.sort((a, b) => (b.elo || 1200) - (a.elo || 1200));
+        } else {
+            players.sort((a, b) => b.collectionCount - a.collectionCount);
+        }
+
+        players.forEach((p, index) => {
+            const rank = index + 1;
+            const isMe = currentUser && p.id === currentUser.uid;
+            const row = document.createElement('div');
+            row.className = `player-row ${isMe ? 'me' : ''}`;
+            
+            row.innerHTML = `
+                <div class="rank-col ${rank <= 3 ? 'rank-' + rank : ''}">${rank}</div>
+                <div class="identity-col">
+                    <div class="mini-avatar"><img src="${p.avatarUrl || '/lobby/1.JPG'}"></div>
+                    <div>
+                        <span class="player-name">${p.playerName || 'Anonymous'}</span>
+                        <span class="player-country">${p.country || 'Neutral Zone'}</span>
+                    </div>
+                </div>
+                <div class="stat-col">${p.elo || 1200}</div>
+                <div class="collection-col">
+                    <span class="collection-tile">🀄</span>
+                    <span>${p.collectionCount} Tiles</span>
+                </div>
+            `;
+            container.appendChild(row);
+        });
+    }
+
+    window.switchSort = (type) => {
+        currentSort = type;
+        document.querySelectorAll('.tab-trigger').forEach(btn => btn.classList.remove('active'));
+        document.getElementById(`tab-${type}`).classList.add('active');
+        renderLeaderboard();
+    };
+</script>
+</body>
+</html>

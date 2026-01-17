@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Initialize Firestore - SG Xiangqi</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        .container {
+            background: white;
+            border-radius: 16px;
+            padding: 40px;
+            max-width: 800px;
+            width: 100%;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 2rem;
+        }
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 0.95rem;
+        }
+        .warning {
+            background: #fff3cd;
+            border: 2px solid #ffc107;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 30px;
+            color: #856404;
+        }
+        .warning strong {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 1.1rem;
+        }
+        .section {
+            margin-bottom: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+        .section h2 {
+            color: #495057;
+            margin-bottom: 15px;
+            font-size: 1.2rem;
+        }
+        .section p {
+            color: #666;
+            line-height: 1.6;
+            margin-bottom: 10px;
+        }
+        .section ul {
+            margin-left: 20px;
+            color: #666;
+        }
+        .section ul li {
+            margin: 8px 0;
+        }
+        button {
+            width: 100%;
+            padding: 16px;
+            background: #28a745;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 1.1rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-top: 10px;
+        }
+        button:hover {
+            background: #218838;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(40, 167, 69, 0.3);
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .log {
+            background: #1a1a1a;
+            color: #00ff00;
+            padding: 20px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+            max-height: 300px;
+            overflow-y: auto;
+            margin-top: 20px;
+            display: none;
+        }
+        .log.visible {
+            display: block;
+        }
+        .log-line {
+            margin: 5px 0;
+        }
+        .success { color: #00ff00; }
+        .error { color: #ff4444; }
+        .info { color: #00bfff; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>🔧 Initialize Firestore Database</h1>
+    <p class="subtitle">Rebuild your Chinese Chess server database structure</p>
+
+    <div class="warning">
+        <strong>⚠️ Warning:</strong>
+        This script will create the following structure in your Firestore database:
+        <ul>
+            <li>3 Regions: Clementi, Jurong, Bedok</li>
+            <li>3 Tables per region (9 total tables)</li>
+            <li>All necessary game documents</li>
+        </ul>
+        Only run this if you need to rebuild your database from scratch!
+    </div>
+
+    <div class="section">
+        <h2>📋 What will be created:</h2>
+        <p><strong>Regions:</strong></p>
+        <ul>
+            <li>Clementi (全文杰) - 15 min base + 5 sec increment</li>
+            <li>Jurong (裕廊) - 10 min base + 3 sec increment</li>
+            <li>Bedok (勿洛) - 20 min base + 10 sec increment</li>
+        </ul>
+        <p><strong>Tables per region:</strong></p>
+        <ul>
+            <li>Table 1, Table 2, Table 3</li>
+        </ul>
+    </div>
+
+    <div class="section">
+        <h2>🎯 Customization:</h2>
+        <p>You can edit this file to customize:</p>
+        <ul>
+            <li>Region names and time controls</li>
+            <li>Number of tables per region</li>
+            <li>Table names</li>
+        </ul>
+        <p>Edit the <code>REGIONS_CONFIG</code> array in the script below.</p>
+    </div>
+
+    <button id="initBtn" onclick="initializeDatabase()">🚀 Initialize Database</button>
+
+    <div id="log" class="log"></div>
+</div>
+
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, collection, doc, addDoc, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    // CUSTOMIZE THIS CONFIGURATION
+    const REGIONS_CONFIG = [
+        {
+            name: "Clementi (全文杰)",
+            baseTime: 900,  // 15 minutes in seconds
+            increment: 5,   // 5 seconds
+            tables: ["SP Poly", "West Gate", "IMM"]
+        },
+        {
+            name: "Jurong (裕廊)",
+            baseTime: 600,  // 10 minutes
+            increment: 3,   // 3 seconds
+            tables: ["Jurong Point", "JEM", "Westgate"]
+        },
+        {
+            name: "Bedok (勿洛)",
+            baseTime: 1200, // 20 minutes
+            increment: 10,  // 10 seconds
+            tables: ["Bedok Mall", "Bedok North", "Simpang Bedok"]
+        }
+    ];
+
+    const firebaseConfig = {
+        apiKey: "AIzaSyDq_LECOrc4SY90SyDsBQGmwl-YnUNFIj8",
+        authDomain: "xiangqi-sq.firebaseapp.com",
+        projectId: "xiangqi-sq",
+        storageBucket: "xiangqi-sq.firebasestorage.app",
+        messagingSenderId: "351923336298",
+        appId: "1:351923336298:web:e7278ea095ba085ac4935b"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    const appId = firebaseConfig.projectId;
+
+    const logEl = document.getElementById('log');
+    const initBtn = document.getElementById('initBtn');
+
+    function log(message, type = 'info') {
+        const logLine = document.createElement('div');
+        logLine.className = `log-line ${type}`;
+        const timestamp = new Date().toLocaleTimeString();
+        logLine.textContent = `[${timestamp}] ${message}`;
+        logEl.appendChild(logLine);
+        logEl.scrollTop = logEl.scrollHeight;
+        console.log(message);
+    }
+
+    window.initializeDatabase = async function() {
+        const user = auth.currentUser;
+        if (!user) {
+            alert('Please login first! Go to index.html to login.');
+            return;
+        }
+
+        if (!confirm('Are you sure you want to initialize the database? This will create new regions and tables.')) {
+            return;
+        }
+
+        initBtn.disabled = true;
+        logEl.classList.add('visible');
+        logEl.innerHTML = '';
+        log('🚀 Starting database initialization...', 'info');
+
+        try {
+            let totalRegions = 0;
+            let totalTables = 0;
+
+            for (const regionConfig of REGIONS_CONFIG) {
+                log(`📍 Creating region: ${regionConfig.name}`, 'info');
+
+                // Create region
+                const regionRef = await addDoc(
+                    collection(db, "artifacts", appId, "public", "data", "regions"),
+                    {
+                        name: regionConfig.name,
+                        baseTime: regionConfig.baseTime,
+                        increment: regionConfig.increment,
+                        createdAt: serverTimestamp()
+                    }
+                );
+
+                totalRegions++;
+                log(`✅ Region created with ID: ${regionRef.id}`, 'success');
+
+                // Create tables for this region
+                for (const tableName of regionConfig.tables) {
+                    log(`  📋 Creating table: ${tableName}`, 'info');
+
+                    const tableRef = await addDoc(
+                        collection(db, "artifacts", appId, "public", "data", "regions", regionRef.id, "tables"),
+                        {
+                            tableName: tableName,
+                            order: Date.now() + totalTables,
+                            observers: 0,
+                            createdAt: serverTimestamp()
+                        }
+                    );
+
+                    // Create corresponding game document
+                    await setDoc(
+                        doc(db, "artifacts", appId, "public", "data", "games", tableRef.id),
+                        {
+                            chat: [],
+                            status: 'waiting',
+                            createdAt: serverTimestamp()
+                        }
+                    );
+
+                    totalTables++;
+                    log(`  ✅ Table created: ${tableName}`, 'success');
+                }
+
+                log(`✅ Region "${regionConfig.name}" completed with ${regionConfig.tables.length} tables`, 'success');
+            }
+
+            log('', 'info');
+            log('🎉 DATABASE INITIALIZATION COMPLETE!', 'success');
+            log(`📊 Summary: ${totalRegions} regions, ${totalTables} tables created`, 'success');
+            log('', 'info');
+            log('✅ You can now go to lobby.html to see your regions and tables!', 'info');
+
+        } catch (error) {
+            log(`❌ ERROR: ${error.message}`, 'error');
+            console.error('Initialization error:', error);
+        } finally {
+            initBtn.disabled = false;
+        }
+    };
+
+    // Check auth state
+    onAuthStateChanged(auth, (user) => {
+        if (!user) {
+            log('⚠️ Not logged in. Please login at index.html first.', 'error');
+            initBtn.disabled = true;
+        } else {
+            log(`👤 Logged in as: ${user.email}`, 'success');
+            initBtn.disabled = false;
+        }
+    });
+</script>
+
+</body>
+</html>

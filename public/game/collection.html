@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Collection - SG Xiangqi</title>
+    <style>
+        :root { --primary: #cd3333; --dark: #0a0a0a; --bg: #05080c; --gold: #f1c40f; --card-bg: #111; }
+        body { font-family: 'Segoe UI', Tahoma, sans-serif; background: var(--bg); margin: 0; color: white; min-height: 100vh; }
+        
+        header { 
+            background: var(--primary); color: white; padding: 15px 30px; 
+            display: flex; justify-content: space-between; align-items: center; 
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5); position: sticky; top: 0; z-index: 100;
+        }
+        .header-left { display: flex; align-items: center; gap: 15px; }
+        .back-btn { background: rgba(0,0,0,0.3); border: none; color: white; padding: 10px 15px; border-radius: 8px; cursor: pointer; font-weight: bold; transition: 0.2s; }
+        .back-btn:hover { background: rgba(0,0,0,0.5); transform: translateX(-5px); }
+
+        .container { max-width: 1200px; margin: 40px auto; padding: 0 20px; }
+
+        /* Stats Section */
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 50px; }
+        .stat-card { background: var(--card-bg); padding: 25px; border-radius: 20px; border: 1px solid #222; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.3); }
+        .stat-val { font-size: 2.5rem; font-weight: 900; color: var(--gold); display: block; }
+        .stat-label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 2px; color: #666; margin-top: 5px; }
+
+        /* Gallery Grid */
+        .gallery-header { margin-bottom: 30px; border-left: 5px solid var(--gold); padding-left: 20px; }
+        .gallery-header h2 { margin: 0; font-size: 2rem; letter-spacing: 1px; }
+        .gallery-header p { margin: 5px 0 0; color: #888; }
+
+        .collection-grid { 
+            display: grid; 
+            grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); 
+            gap: 20px; 
+        }
+
+        .tile-card {
+            background: #1a1a1a; aspect-ratio: 3/4; border-radius: 15px;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            border: 2px solid #222; transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            position: relative; overflow: hidden;
+        }
+
+        /* Locked State */
+        .tile-card.locked { opacity: 0.3; filter: grayscale(1) blur(1px); }
+        .tile-card.locked .tile-icon { transform: scale(0.8); }
+
+        /* Unlocked State */
+        .tile-card.unlocked { 
+            background: linear-gradient(145deg, #222, #111);
+            border-color: var(--gold); 
+            box-shadow: 0 15px 35px rgba(241, 196, 15, 0.15);
+        }
+        .tile-card.unlocked:hover { transform: translateY(-10px) rotate(3deg); box-shadow: 0 20px 45px rgba(241, 196, 15, 0.3); }
+        
+        .tile-icon { font-size: 4rem; margin-bottom: 10px; transition: transform 0.3s ease; filter: drop-shadow(0 0 10px rgba(0,0,0,0.5)); }
+        .tile-card.unlocked .tile-icon { filter: drop-shadow(0 0 15px rgba(241, 196, 15, 0.4)); }
+        
+        .tile-name { font-size: 0.7rem; font-weight: 800; color: #444; text-transform: uppercase; letter-spacing: 1px; }
+        .tile-card.unlocked .tile-name { color: var(--gold); }
+
+        .new-badge {
+            position: absolute; top: 10px; right: 10px; background: var(--primary);
+            color: white; font-size: 0.5rem; padding: 4px 8px; border-radius: 10px;
+            font-weight: 900; animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+
+        /* Progress Bar */
+        .progress-container { width: 100%; height: 10px; background: #222; border-radius: 10px; margin-top: 15px; overflow: hidden; }
+        #progress-fill { width: 0%; height: 100%; background: var(--gold); transition: width 1s ease; box-shadow: 0 0 10px var(--gold); }
+    </style>
+</head>
+<body>
+
+<header>
+    <div class="header-left">
+        <!-- FIXED: Use fully qualified absolute path to navigate back to the lobby -->
+        <button class="back-btn" onclick="window.location.href=window.location.origin + '/lobby/lobby.html'">← LOBBY</button>
+        <h1 style="margin:0; font-size: 1.2rem; letter-spacing: 1px;">VICTORY COLLECTION</h1>
+    </div>
+    <div id="user-display" style="font-weight: bold; color: var(--gold); font-size: 0.9rem;"></div>
+</header>
+
+<div class="container">
+    <div class="stats-grid">
+        <div class="stat-card">
+            <span id="stat-total" class="stat-val">0</span>
+            <span class="stat-label">Total Tiles</span>
+            <div class="progress-container"><div id="progress-fill"></div></div>
+        </div>
+        <div class="stat-card">
+            <span id="stat-unlocked" class="stat-val">0</span>
+            <span class="stat-label">Unique Found</span>
+        </div>
+        <div class="stat-card">
+            <span id="stat-rank" class="stat-val">Novice</span>
+            <span class="stat-label">Collector Tier</span>
+        </div>
+    </div>
+
+    <div class="gallery-header">
+        <h2>Identity Artifacts</h2>
+        <p>Your unique Mahjong rewards earned from match victories.</p>
+    </div>
+
+    <div id="collection-grid" class="collection-grid">
+        <!-- Generated by JS -->
+    </div>
+</div>
+
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, doc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    const firebaseConfig = { apiKey: "AIzaSyDq_LECOrc4SY90SyDsBQGmwl-YnUNFIj8", authDomain: "xiangqi-sq.firebaseapp.com", projectId: "xiangqi-sq", storageBucket: "xiangqi-sq.firebasestorage.app", messagingSenderId: "351923336298", appId: "1:351923336298:web:e7278ea095ba085ac4935b" };
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    const appId = "sg-xiangqi";
+
+    const ALL_TILES = [
+        { char: '🀀', name: 'East' }, { char: '🀁', name: 'South' }, { char: '🀂', name: 'West' }, { char: '🀃', name: 'North' },
+        { char: '🀄', name: 'Red Dragon' }, { char: '🀅', name: 'Green Dragon' }, { char: '🀆', name: 'White Dragon' },
+        { char: '🀇', name: 'Man 1' }, { char: '🀈', name: 'Man 2' }, { char: '🀉', name: 'Man 3' }, { char: '🀊', name: 'Man 4' }, { char: '🀋', name: 'Man 5' },
+        { char: '🀌', name: 'Man 6' }, { char: '🀍', name: 'Man 7' }, { char: '🀎', name: 'Man 8' }, { char: '🀏', name: 'Man 9' },
+        { char: '🀐', name: 'Bamboo 1' }, { char: '🀑', name: 'Bamboo 2' }, { char: '🀒', name: 'Bamboo 3' }, { char: '🀓', name: 'Bamboo 4' },
+        { char: '🀔', name: 'Bamboo 5' }, { char: '🀕', name: 'Bamboo 6' }, { char: '🀖', name: 'Bamboo 7' }, { char: '🀗', name: 'Bamboo 8' }, { char: '🀘', name: 'Bamboo 9' },
+        { char: '🀙', name: 'Dot 1' }, { char: '🀚', name: 'Dot 2' }, { char: '🀛', name: 'Dot 3' }, { char: '🀜', name: 'Dot 4' },
+        { char: '🀝', name: 'Dot 5' }, { char: '🀞', name: 'Dot 6' }, { char: '🀟', name: 'Dot 7' }, { char: '🀠', name: 'Dot 8' }, { char: '🀡', name: 'Dot 9' }
+    ];
+
+    onAuthStateChanged(auth, (user) => {
+        if (!user) {
+            // FIXED: Use fully qualified absolute path for the redirection to login
+            window.location.href = window.location.origin + '/index.html';
+            return;
+        }
+
+        const profileRef = doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'data');
+        onSnapshot(profileRef, (snap) => {
+            if (snap.exists()) {
+                const data = snap.data();
+                const collection = data.mahjongCollection || [];
+                renderCollection(collection);
+                updateStats(collection, data.playerName || user.email);
+            } else {
+                renderCollection([]);
+            }
+        });
+    });
+
+    function renderCollection(owned) {
+        const grid = document.getElementById('collection-grid');
+        grid.innerHTML = "";
+
+        ALL_TILES.forEach(tile => {
+            const isOwned = owned.includes(tile.char);
+            const card = document.createElement('div');
+            card.className = `tile-card ${isOwned ? 'unlocked' : 'locked'}`;
+            card.innerHTML = `
+                <div class="tile-icon">${tile.char}</div>
+                <div class="tile-name">${tile.name}</div>
+            `;
+            grid.appendChild(card);
+        });
+    }
+
+    function updateStats(owned, name) {
+        const uniqueCount = new Set(owned).size;
+        const totalPossible = ALL_TILES.length;
+        const percent = (uniqueCount / totalPossible) * 100;
+
+        document.getElementById('user-display').innerText = name.toUpperCase();
+        document.getElementById('stat-total').innerText = owned.length;
+        document.getElementById('stat-unlocked').innerText = `${uniqueCount} / ${totalPossible}`;
+        document.getElementById('progress-fill').style.width = `${percent}%`;
+
+        // Rank Logic
+        let tier = "Novice";
+        if (percent > 20) tier = "Apprentice";
+        if (percent > 50) tier = "Master";
+        if (percent > 80) tier = "Grandmaster";
+        if (percent === 100) tier = "Immortal";
+        document.getElementById('stat-rank').innerText = tier;
+    }
+</script>
+</body>
+</html>

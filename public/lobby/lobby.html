@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SG Xiangqi - Lobby</title>
+    <style>
+        :root { --primary: #cd3333; --dark: #2c3e50; --bg: #f0f2f5; --gold: #f1c40f; --light-blue: #e0f2fe; --dark-blue: #1e3a8a; --success: #10b981; --info: #3b82f6; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--bg); margin: 0; padding: 15px; color: #333; }
+        
+        header { 
+            background: var(--primary); color: white; padding: 8px 20px; border-radius: 10px; 
+            display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+        }
+        .logo-area { display: flex; align-items: center; gap: 10px; }
+        .lobby-logo { height: 30px; width: auto; filter: brightness(0) invert(1); } 
+        header h1 { margin: 0; font-size: 1.2rem; font-weight: 800; letter-spacing: -0.5px; }
+
+        .header-right { display: flex; align-items: center; gap: 8px; }
+        
+        .btn-collection { background: var(--gold); color: #000; border: none; padding: 6px 10px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; transition: 0.2s; text-decoration: none; }
+        .btn-collection:hover { transform: scale(1.1); }
+
+        .btn-setup { background: var(--light-blue); color: var(--dark-blue); border: 1px solid rgba(0,0,0,0.05); padding: 6px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: 0.2s; }
+        .btn-setup:hover { transform: translateY(-1px); background: #bae6fd; }
+
+        .user-profile-widget { display: flex; align-items: center; gap: 10px; background: rgba(0,0,0,0.15); padding: 4px 12px 4px 4px; border-radius: 30px; border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(5px); }
+        .avatar-frame { width: 32px; height: 32px; border-radius: 50%; border: 1.5px solid var(--gold); overflow: hidden; background: #000; flex-shrink: 0; }
+        #display-avatar { width: 100%; height: 100%; object-fit: cover; }
+        .user-text-stack { display: flex; flex-direction: column; }
+        #user-info { font-size: 0.75rem; font-weight: 800; color: white; line-height: 1.1; }
+        .rank-label { font-size: 0.55rem; color: var(--gold); text-transform: uppercase; font-weight: 900; }
+        
+        .region-section { margin-top: 12px; background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
+        .region-header { background: var(--dark); color: white; padding: 10px 20px; display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
+        .collapse-icon { transition: transform 0.3s ease; font-size: 0.8rem; }
+        .region-section.collapsed .table-grid { display: none; }
+        
+        .table-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 15px; padding: 15px; background: #fafafa; }
+
+        .chess-table { border: 1px solid #e2e8f0; border-radius: 18px; padding: 12px; text-align: center; background: #fff; transition: 0.2s; position: relative; }
+        .chess-table:hover { transform: translateY(-3px); border-color: var(--primary); }
+        .chess-table.stale { border: 2px dashed #ef4444; background: #fff1f2; }
+        
+        .table-meta { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
+        .status-pill { padding: 2px 8px; border-radius: 12px; font-size: 0.55rem; font-weight: 900; text-transform: uppercase; }
+        .status-open { background: #dcfce7; color: #166534; }
+        .status-busy { background: #fee2e2; color: #991b1b; }
+        .status-waiting { background: #fef9c3; color: #854d0e; }
+        .status-violation { background: #000; color: #fff; border: 1px solid #ef4444; }
+
+        .mahjong-icon { font-size: 2.2rem; display: block; margin: 2px 0; }
+        .table-name-txt { display: block; margin-bottom: 8px; font-size: 0.85rem; color: #1e293b; font-weight: 700; }
+        
+        .roster { background: #f1f5f9; border-radius: 10px; padding: 6px; margin-bottom: 10px; display: flex; flex-direction: column; gap: 4px; }
+        .slot { display: flex; align-items: center; gap: 8px; text-align: left; }
+        .slot.empty { opacity: 0.3; font-style: italic; }
+        .mini-avatar { width: 20px; height: 20px; border-radius: 50%; border: 1px solid #fff; overflow: hidden; background: #cbd5e1; flex-shrink: 0; }
+        .mini-avatar img { width: 100%; height: 100%; object-fit: cover; }
+        .slot-name { font-size: 0.7rem; font-weight: 700; color: #334155; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+        .btn-enter { background: var(--success); color: white; border: none; padding: 10px; border-radius: 10px; cursor: pointer; width: 100%; font-weight: 900; text-transform: uppercase; font-size: 0.75rem; transition: 0.2s; }
+        .btn-enter:hover { background: #059669; }
+        
+        .btn-watch { background: var(--info); color: white; border: none; padding: 10px; border-radius: 10px; cursor: pointer; width: 100%; font-weight: 900; text-transform: uppercase; font-size: 0.75rem; transition: 0.2s; }
+        .btn-watch:hover { background: #2563eb; }
+
+        .btn-reset-stale { background: #000; color: #ef4444; border: 1px solid #ef4444; padding: 5px; border-radius: 8px; margin-top: 5px; width: 100%; font-size: 0.65rem; font-weight: 900; cursor: pointer; }
+    </style>
+</head>
+<body>
+
+<header>
+    <div class="logo-area">
+        <img src="/pictures/Singapore.png" alt="Lion" class="lobby-logo" onerror="this.src='/lobby/Singapore.png';">
+        <h1>SG Xiangqi</h1>
+    </div>
+    <div class="header-right">
+        <button id="admin-link-btn" style="display:none; background:var(--gold); border:none; padding:6px 12px; border-radius:6px; font-weight:900; cursor:pointer; font-size: 0.75rem;" onclick="window.location.href=window.location.origin + '/admin.html'">Admin</button>
+        
+        <button class="btn-collection" title="My Mahjong Collection" onclick="window.location.href=window.location.origin + '/game/collection.html'">🀄</button>
+
+        <button class="btn-setup" title="Visual & Avatar Settings" onclick="window.location.href=window.location.origin + '/lobby/setting.html'">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
+            </svg>
+        </button>
+
+        <div class="user-profile-widget">
+            <div class="avatar-frame"><img id="display-avatar" src="/lobby/1.JPG" onerror="this.src='/lobby/1.JPG'"></div>
+            <div class="user-text-stack"><span id="user-info">...</span><span class="rank-label">Novice</span></div>
+        </div>
+
+        <button style="background:var(--dark); color:white; border:none; padding:8px 12px; border-radius:6px; cursor:pointer; font-weight:bold; font-size: 0.75rem;" onclick="handleLogout()">Logout</button>
+    </div>
+</header>
+
+<div id="lobby-container">
+    <p style="text-align: center; padding: 60px; color: #94a3b8; font-weight: bold; font-size: 0.9rem;">SYNCHRONIZING REGIONS...</p>
+</div>
+
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, collection, doc, onSnapshot, query, orderBy, updateDoc, deleteField, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    const firebaseConfig = { apiKey: "AIzaSyDq_LECOrc4SY90SyDsBQGmwl-YnUNFIj8", authDomain: "xiangqi-sq.firebaseapp.com", projectId: "xiangqi-sq", storageBucket: "xiangqi-sq.firebasestorage.app", messagingSenderId: "351923336298", appId: "1:351923336298:web:e7278ea095ba085ac4935b" };
+    const app = initializeApp(firebaseConfig); const auth = getAuth(app); const db = getFirestore(app); const appId = "sg-xiangqi";
+    
+    const mahjongTiles = ['🀀', '🀁', '🀂', '🀃', '🀄', '🀅', '🀆', '🀇', '🀈', '🀉', '🀊', '🀋', '🀌', '🀍', '🀎', '🀏', '🀐', '🀑', '🀒', '🀓', '🀔', '🀕', '🀖', '🀗', '🀘', '🀙', '🀚', '🀛', '🀜', '🀝', '🀞', '🀟'];
+    window.isAdmin = false;
+
+    window.handleLogout = async () => {
+        try { await signOut(auth); window.location.href = window.location.origin + '/index.html'; } catch (e) {}
+    };
+
+    onAuthStateChanged(auth, (user) => {
+        if (!user) window.location.href = window.location.origin + '/index.html';
+        else {
+            onSnapshot(doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'data'), (snap) => {
+                if (snap.exists()) {
+                    const d = snap.data();
+                    document.getElementById('user-info').innerText = d.playerName || user.email;
+                    if (d.avatarUrl) document.getElementById('display-avatar').src = d.avatarUrl;
+                    if (d.role === 'admin') {
+                        document.getElementById('admin-link-btn').style.display = 'block';
+                        window.isAdmin = true;
+                    }
+                }
+            });
+            listenToRegions();
+        }
+    });
+
+    window.toggleRegion = (id) => document.getElementById(`region-${id}`).classList.toggle('collapsed');
+
+    // ADMIN CLEANUP: Force Clear Table Seats & Reset Game Data
+    window.forceResetTable = async (regionId, tableId) => {
+        if (!confirm("Are you sure you want to kick players and reset this broken table? This will wipe the current move record and chat.")) return;
+        try {
+            // 1. Reset Seating in Table Document
+            const tableRef = doc(db, "artifacts", appId, "public", "data", "regions", regionId, "tables", tableId);
+            await updateDoc(tableRef, {
+                playerRed: deleteField(),
+                playerBlack: deleteField(),
+                observers: 0
+            });
+
+            // 2. Reset Game Engine Data (Board, Moves, Chat)
+            const gameRef = doc(db, "artifacts", appId, "public", "data", "games", tableId);
+            await setDoc(gameRef, {
+                board: null, // Engine will re-init to default
+                turn: 'red',
+                history: [],
+                status: 'waiting',
+                chat: [],
+                lastMoveTime: null
+            }, { merge: true });
+
+            console.log("Full reset performed on " + tableId);
+        } catch (e) { console.error("Reset failed", e); }
+    };
+
+    function listenToRegions() {
+        const q = query(collection(db, "artifacts", appId, "public", "data", "regions"), orderBy("createdAt", "desc"));
+        onSnapshot(q, (snapshot) => {
+            const container = document.getElementById('lobby-container');
+            container.innerHTML = snapshot.empty ? "<p style='text-align:center; padding:30px;'>No regions active.</p>" : "";
+            snapshot.forEach(docSnap => {
+                const r = docSnap.data();
+                const section = document.createElement('div');
+                section.className = 'region-section'; section.id = `region-${docSnap.id}`;
+                section.innerHTML = `
+                    <div class="region-header" onclick="toggleRegion('${docSnap.id}')">
+                        <span><strong>${r.name}</strong> <small style="margin-left:8px; opacity:0.5;">${r.baseTime}m+${r.increment}s</small></span>
+                        <span class="collapse-icon">▼</span>
+                    </div>
+                    <div class="table-grid" id="tables-${docSnap.id}"></div>
+                `;
+                container.appendChild(section);
+                listenToTables(docSnap.id);
+            });
+        });
+    }
+
+    function listenToTables(regionId) {
+        const q = query(collection(db, "artifacts", appId, "public", "data", "regions", regionId, "tables"), orderBy("order", "asc"));
+        onSnapshot(q, (snapshot) => {
+            const grid = document.getElementById(`tables-${regionId}`);
+            if (!grid) return;
+            grid.innerHTML = "";
+            snapshot.forEach(tableDoc => {
+                const t = tableDoc.data();
+                const isDoubleSat = t.playerRed && t.playerBlack && t.playerRed.uid === t.playerBlack.uid;
+                const isFull = t.playerRed && t.playerBlack;
+                
+                let status = !t.playerRed && !t.playerBlack ? 'open' : (isFull ? 'busy' : 'waiting');
+                if (isDoubleSat) status = 'violation';
+
+                const tile = mahjongTiles[Math.floor(Math.random() * mahjongTiles.length)];
+                const card = document.createElement('div'); 
+                card.className = `chess-table ${isDoubleSat ? 'stale' : ''}`;
+                
+                const btnLabel = isFull ? 'Watch Match' : 'Join Match';
+                const btnClass = isFull ? 'btn-watch' : 'btn-enter';
+
+                // LOGIC: Admins always see the entry button to inspect, even if double-sat
+                const entryButtonHTML = `<button class="${btnClass}" onclick="window.location.href=window.location.origin + '/game/board.html?id=${tableDoc.id}&rid=${regionId}&tile=${encodeURIComponent(tile)}'">${btnLabel}</button>`;
+
+                card.innerHTML = `
+                    <div class="table-meta">
+                        <span class="status-pill status-${status}">${isDoubleSat ? 'FIX REQUIRED' : status}</span>
+                    </div>
+                    <span class="mahjong-icon">${tile}</span><strong class="table-name-txt">${t.tableName}</strong>
+                    <div class="roster">
+                        <div class="slot ${!t.playerRed?'empty':''}">
+                            <div class="mini-avatar"><img src="${t.playerRed?.avatar || '/lobby/1.JPG'}"></div>
+                            <span class="slot-name">${t.playerRed?.name || 'Waiting...'} ${isDoubleSat?'(⚠️)':''}</span>
+                        </div>
+                        <div class="slot ${!t.playerBlack?'empty':''}">
+                            <div class="mini-avatar"><img src="${t.playerBlack?.avatar || '/lobby/1.JPG'}"></div>
+                            <span class="slot-name">${t.playerBlack?.name || 'Waiting...'} ${isDoubleSat?'(⚠️)':''}</span>
+                        </div>
+                    </div>
+                    ${!isDoubleSat || window.isAdmin ? entryButtonHTML : `<p style='font-size:0.6rem; color:#ef4444; font-weight:bold;'>Table Stale: Await Admin Reset</p>`}
+                    ${isDoubleSat && window.isAdmin ? `<button class="btn-reset-stale" onclick="forceResetTable('${regionId}', '${tableDoc.id}')">FORCE FULL RESET</button>` : ''}
+                `;
+                grid.appendChild(card);
+            });
+        });
+    }
+</script>
+</body>
+</html>

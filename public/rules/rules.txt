@@ -1,0 +1,52 @@
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // 1. Rules for SG Xiangqi Artifact Path
+    match /artifacts/{appId} {
+      
+      // User Profiles: Users read all, write only their own
+      match /users/{userId}/profile/data {
+        allow read: if request.auth != null;
+        allow write: if request.auth != null && request.auth.uid == userId;
+      }
+      
+      // Registration: Name availability checks
+      match /public/data/usernames/{name} {
+        allow read: if true; 
+        allow write: if request.auth != null;
+      }
+      
+      // Region Management: Admins only for creation/deletion
+      match /public/data/regions/{regionId} {
+        allow read: if request.auth != null;
+        allow write: if request.auth != null && 
+          get(/databases/$(database)/documents/artifacts/$(appId)/users/$(request.auth.uid)/profile/data).data.role == "admin";
+          
+        // Tables: Players need write access to claim a seat (playerRed/playerBlack)
+        match /tables/{tableId} {
+          allow read: if request.auth != null;
+          allow write: if request.auth != null; 
+        }
+      }
+
+      // --- NEW ENTRY: Chat & Gameplay ---
+      // Necessary for sendChat(), executeMove(), and initiating game state
+      match /public/data/games/{gameId} {
+        allow read: if request.auth != null;
+        allow write: if request.auth != null; 
+      }
+    }
+
+    // 2. Legacy Support (Root level collections)
+    match /users/{userId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    match /regions/{regionId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin";
+    }
+  }
+}

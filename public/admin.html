@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SG Xiangqi - Admin Command</title>
+    <style>
+        :root { --primary: #cd3333; --dark: #1e293b; --bg: #f8fafc; --gold: #f1c40f; }
+        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); margin: 0; padding: 20px; color: #333; }
+        
+        header { background: var(--primary); color: white; padding: 15px 25px; border-radius: 12px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        h1 { margin: 0; font-size: 1.4rem; font-weight: 800; letter-spacing: -1px; }
+
+        .dashboard-grid { display: grid; grid-template-columns: 350px 1fr; gap: 30px; }
+        
+        .card { background: white; border-radius: 16px; padding: 25px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border: 1px solid #e2e8f0; margin-bottom: 20px; }
+        .card h2 { margin-top: 0; font-size: 1.1rem; border-bottom: 2px solid #f1f5f9; padding-bottom: 15px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }
+
+        /* Region List */
+        .item-list { display: flex; flex-direction: column; gap: 10px; }
+        .item { padding: 15px; border-radius: 10px; background: #f1f5f9; border: 2px solid transparent; cursor: pointer; transition: 0.2s; position: relative; }
+        .item:hover { background: #e2e8f0; }
+        .item.active { border-color: var(--primary); background: white; box-shadow: 0 4px 12px rgba(205, 51, 51, 0.1); }
+        .item strong { display: block; font-size: 1rem; }
+        .item small { color: #64748b; font-weight: bold; }
+        
+        .btn-del-region { position: absolute; top: 10px; right: 10px; background: none; border: none; color: #ccc; cursor: pointer; font-size: 1.2rem; }
+        .btn-del-region:hover { color: #ef4444; }
+
+        /* Table Editor */
+        .table-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }
+        .table-card { border: 1px solid #e2e8f0; border-radius: 12px; padding: 15px; background: #fff; position: relative; }
+        .table-card h3 { margin: 0 0 10px 0; font-size: 0.9rem; color: #64748b; }
+
+        .form-group { margin-bottom: 15px; }
+        label { display: block; font-size: 0.75rem; font-weight: 800; text-transform: uppercase; color: #94a3b8; margin-bottom: 5px; }
+        input { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box; }
+
+        .btn { border: none; padding: 10px 15px; border-radius: 8px; font-weight: bold; cursor: pointer; transition: 0.2s; font-size: 0.8rem; }
+        .btn-primary { background: var(--primary); color: white; }
+        .btn-success { background: #10b981; color: white; }
+        .btn-danger { background: #ef4444; color: white; }
+        .btn-reset { background: #0f172a; color: var(--gold); }
+        .btn-warning { background: #f59e0b; color: white; }
+        .btn-sm { padding: 6px 10px; font-size: 0.7rem; }
+
+        .modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); display: none; align-items: center; justify-content: center; z-index: 1000; }
+        .modal-content { background: white; padding: 30px; border-radius: 20px; width: 400px; box-shadow: 0 20px 50px rgba(0,0,0,0.2); }
+
+        #auth-guard { position: fixed; top:0; left:0; width:100%; height:100%; background:white; z-index:9999; display:flex; align-items:center; justify-content:center; flex-direction:column; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+
+<div id="auth-guard">
+    <div style="width: 40px; height: 40px; border: 4px solid #f3f3f3; border-top: 4px solid var(--primary); border-radius: 50%; animation: spin 1s linear infinite;"></div>
+    <p>Verifying Credentials...</p>
+</div>
+
+<header>
+    <h1>SG Xiangqi :: Admin Terminal</h1>
+    <div>
+        <button class="btn" style="background:rgba(255,255,255,0.2); color:white;" onclick="window.location.href=window.location.origin + '/lobby/lobby.html'">Exit to Lobby</button>
+    </div>
+</header>
+
+<div class="dashboard-grid">
+    <!-- REGION COLUMN -->
+    <aside>
+        <div class="card">
+            <h2>Regions <button class="btn btn-primary btn-sm" onclick="showAddRegion()">+ Add</button></h2>
+            <div id="region-list" class="item-list">
+                <p style="color:#94a3b8; font-size:0.8rem;">Loading regions...</p>
+            </div>
+        </div>
+
+        <!-- NEW: REGION EDITOR -->
+        <div id="region-editor-card" class="card" style="display:none;">
+            <h2>Region Settings</h2>
+            <div class="form-group">
+                <label>Region Name</label>
+                <input type="text" id="edit-reg-name">
+            </div>
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+                <div class="form-group">
+                    <label>Base (Min)</label>
+                    <input type="number" id="edit-reg-time">
+                </div>
+                <div class="form-group">
+                    <label>Incr (Sec)</label>
+                    <input type="number" id="edit-reg-inc">
+                </div>
+            </div>
+            <button class="btn btn-success" style="width:100%" onclick="updateRegionSettings()">Save Region Details</button>
+        </div>
+    </aside>
+
+    <!-- TABLES COLUMN -->
+    <main>
+        <div class="card">
+            <h2>
+                Table Management 
+                <div style="display:flex; gap:10px;">
+                    <button id="mass-reset-btn" class="btn btn-warning btn-sm" style="display:none;" onclick="adminMassReset()">FLUSH ALL TABLES 🧹</button>
+                    <button id="add-table-btn" class="btn btn-primary btn-sm" style="display:none;" onclick="showAddTable()">+ New Table</button>
+                </div>
+            </h2>
+            <div id="table-container" class="table-grid">
+                <p style="color:#94a3b8; padding: 40px; text-align: center; width: 100%;">Select a region to manage tables.</p>
+            </div>
+        </div>
+    </main>
+</div>
+
+<!-- MODALS -->
+<div id="region-modal" class="modal">
+    <div class="modal-content">
+        <h3>Create New Region</h3>
+        <div class="form-group"><label>Region Name</label><input type="text" id="reg-name" placeholder="e.g. Jurong East"></div>
+        <div class="form-group"><label>Base Time (Minutes)</label><input type="number" id="reg-time" value="10"></div>
+        <div class="form-group"><label>Increment (Seconds)</label><input type="number" id="reg-inc" value="5"></div>
+        <div style="display:flex; gap:10px; margin-top:20px;">
+            <button class="btn btn-success" style="flex:1" onclick="createRegion()">Create</button>
+            <button class="btn btn-danger" onclick="closeModals()">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<div id="table-modal" class="modal">
+    <div class="modal-content">
+        <h3>Create New Table</h3>
+        <div class="form-group"><label>Table Name</label><input type="text" id="tab-name" placeholder="Table 1"></div>
+        <div style="display:flex; gap:10px; margin-top:20px;">
+            <button class="btn btn-success" style="flex:1" onclick="createTable()">Create</button>
+            <button class="btn btn-danger" onclick="closeModals()">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, collection, doc, onSnapshot, query, orderBy, setDoc, addDoc, updateDoc, deleteDoc, serverTimestamp, deleteField, getDocs, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    const firebaseConfig = { apiKey: "AIzaSyDq_LECOrc4SY90SyDsBQGmwl-YnUNFIj8", authDomain: "xiangqi-sq.firebaseapp.com", projectId: "xiangqi-sq", storageBucket: "xiangqi-sq.firebasestorage.app", messagingSenderId: "351923336298", appId: "1:351923336298:web:e7278ea095ba085ac4935b" };
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    const appId = "sg-xiangqi";
+
+    let activeRegionId = null;
+    let tablesUnsubscribe = null;
+
+    onAuthStateChanged(auth, async (user) => {
+        if (!user) { window.location.href = window.location.origin + '/index.html'; return; }
+        
+        onSnapshot(doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'data'), (snap) => {
+            if (snap.exists() && snap.data().role === 'admin') {
+                document.getElementById('auth-guard').style.display = 'none';
+                loadRegions();
+            } else {
+                window.location.href = window.location.origin + '/lobby/lobby.html';
+            }
+        });
+    });
+
+    function loadRegions() {
+        const q = query(collection(db, "artifacts", appId, "public", "data", "regions"), orderBy("createdAt", "desc"));
+        onSnapshot(q, (snapshot) => {
+            const list = document.getElementById('region-list');
+            list.innerHTML = "";
+            snapshot.forEach(snap => {
+                const r = snap.data();
+                const div = document.createElement('div');
+                div.className = `item ${activeRegionId === snap.id ? 'active' : ''}`;
+                div.onclick = () => selectRegion(snap.id, r);
+                div.innerHTML = `
+                    <strong>${r.name}</strong><small>${r.baseTime}m + ${r.increment}s</small>
+                    <button class="btn-del-region" onclick="event.stopPropagation(); deleteRegion('${snap.id}')">×</button>
+                `;
+                list.appendChild(div);
+            });
+        });
+    }
+
+    window.selectRegion = (rid, data) => {
+        activeRegionId = rid;
+        
+        // Show Region Editor and populate
+        document.getElementById('region-editor-card').style.display = 'block';
+        document.getElementById('edit-reg-name').value = data.name;
+        document.getElementById('edit-reg-time').value = data.baseTime;
+        document.getElementById('edit-reg-inc').value = data.increment;
+
+        document.getElementById('add-table-btn').style.display = 'block';
+        document.getElementById('mass-reset-btn').style.display = 'block';
+        
+        loadRegions();
+        loadTables(rid);
+    };
+
+    window.updateRegionSettings = async () => {
+        if (!activeRegionId) return;
+        const name = document.getElementById('edit-reg-name').value;
+        const time = parseInt(document.getElementById('edit-reg-time').value);
+        const inc = parseInt(document.getElementById('edit-reg-inc').value);
+
+        if (!name) return alert("Region name required.");
+
+        try {
+            await updateDoc(doc(db, "artifacts", appId, "public", "data", "regions", activeRegionId), {
+                name, baseTime: time, increment: inc
+            });
+            alert("Region details updated successfully.");
+        } catch (e) { alert("Error: " + e.message); }
+    };
+
+    function loadTables(rid) {
+        if (tablesUnsubscribe) tablesUnsubscribe();
+        const q = query(collection(db, "artifacts", appId, "public", "data", "regions", rid, "tables"), orderBy("order", "asc"));
+        
+        tablesUnsubscribe = onSnapshot(q, (snapshot) => {
+            const container = document.getElementById('table-container');
+            container.innerHTML = "";
+            snapshot.forEach(tableSnap => {
+                const t = tableSnap.data();
+                const card = document.createElement('div');
+                card.className = "table-card";
+                card.innerHTML = `
+                    <h3>TABLE: ${tableSnap.id}</h3>
+                    <div class="form-group">
+                        <label>Display Name</label>
+                        <input type="text" id="name-${tableSnap.id}" value="${t.tableName || ''}">
+                    </div>
+                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:5px; margin-top:10px;">
+                        <button class="btn btn-success btn-sm" onclick="saveTable('${tableSnap.id}')">Save</button>
+                        <button class="btn btn-danger btn-sm" onclick="deleteTable('${tableSnap.id}')">Delete</button>
+                        <button class="btn btn-reset btn-sm" style="grid-column: span 2;" onclick="adminFullReset('${tableSnap.id}')">FORCE FULL RESET 🥾</button>
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+        });
+    }
+
+    window.adminFullReset = async (tableId, silent = false) => {
+        if (!activeRegionId) return;
+        if (!silent && !confirm("Kick players and wipe history for this table?")) return;
+
+        try {
+            const tableRef = doc(db, "artifacts", appId, "public", "data", "regions", activeRegionId, "tables", tableId);
+            await updateDoc(tableRef, { playerRed: deleteField(), playerBlack: deleteField(), observers: 0 });
+
+            const gameRef = doc(db, "artifacts", appId, "public", "data", "games", tableId);
+            await setDoc(gameRef, {
+                board: null,
+                turn: 'red',
+                history: [],
+                status: 'waiting',
+                chat: [],
+                clocks: null,
+                lastMoveTime: null
+            }, { merge: true });
+        } catch (e) { console.error("Reset Failed for " + tableId, e); }
+    };
+
+    window.adminMassReset = async () => {
+        if (!activeRegionId) return;
+        if (!confirm("CRITICAL ACTION: This will kick ALL players and reset ALL tables in this region. Continue?")) return;
+
+        const tablesRef = collection(db, "artifacts", appId, "public", "data", "regions", activeRegionId, "tables");
+        const snap = await getDocs(tablesRef);
+        const promises = [];
+        snap.forEach(docSnap => promises.push(window.adminFullReset(docSnap.id, true)));
+        await Promise.all(promises);
+    };
+
+    window.saveTable = async (tid) => {
+        const newName = document.getElementById(`name-${tid}`).value;
+        await updateDoc(doc(db, "artifacts", appId, "public", "data", "regions", activeRegionId, "tables", tid), { tableName: newName });
+    };
+
+    window.deleteTable = async (tid) => {
+        if (confirm("Delete this table forever?")) {
+            await deleteDoc(doc(db, "artifacts", appId, "public", "data", "regions", activeRegionId, "tables", tid));
+        }
+    };
+
+    window.deleteRegion = async (rid) => {
+        if (confirm("Delete this entire region and all its tables? This cannot be undone.")) {
+            await deleteDoc(doc(db, "artifacts", appId, "public", "data", "regions", rid));
+            if (activeRegionId === rid) {
+                activeRegionId = null;
+                document.getElementById('region-editor-card').style.display = 'none';
+                document.getElementById('table-container').innerHTML = "<p style='color:#94a3b8; padding: 40px; text-align: center; width: 100%;'>Select a region to manage tables.</p>";
+            }
+        }
+    };
+
+    window.createRegion = async () => {
+        const name = document.getElementById('reg-name').value;
+        const baseTime = parseInt(document.getElementById('reg-time').value);
+        const increment = parseInt(document.getElementById('reg-inc').value);
+        if (!name) return;
+        await addDoc(collection(db, "artifacts", appId, "public", "data", "regions"), { name, baseTime, increment, createdAt: serverTimestamp() });
+        closeModals();
+    };
+
+    window.createTable = async () => {
+        const name = document.getElementById('tab-name').value;
+        if (!name || !activeRegionId) return;
+        await addDoc(collection(db, "artifacts", appId, "public", "data", "regions", activeRegionId, "tables"), { tableName: name, order: Date.now(), observers: 0 });
+        closeModals();
+    };
+
+    window.showAddRegion = () => document.getElementById('region-modal').style.display = 'flex';
+    window.showAddTable = () => document.getElementById('table-modal').style.display = 'flex';
+    window.closeModals = () => document.querySelectorAll('.modal').forEach(m => m.style.display = 'none');
+</script>
+</body>
+</html>

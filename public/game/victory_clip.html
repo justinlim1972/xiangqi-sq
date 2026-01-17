@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SG Xiangqi - General's Revelation</title>
+    <style>
+        :root { --gold: #f1c40f; --blood: #990000; --ink: #05080c; }
+        body { margin: 0; overflow: hidden; background: var(--ink); font-family: 'Segoe UI', sans-serif; color: white; }
+        #clip-container { width: 100vw; height: 100vh; position: relative; overflow: hidden; display: none; background: #000; }
+        #general-bg { width: 140%; height: 140%; position: absolute; top: -20%; left: -20%; object-fit: cover; opacity: 0; transition: opacity 2s ease-in; }
+        .camera-zoom { animation: comicDolly 20s linear forwards; }
+        @keyframes comicDolly { 0% { transform: scale(1); } 100% { transform: scale(1.1); } }
+        .vignette { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 15; background: radial-gradient(circle, transparent 20%, rgba(0,0,0,0.9) 100%); }
+        .victory-stamp { position: absolute; top: 35%; left: 50%; transform: translate(-50%, -50%) scale(3); font-size: 10rem; font-weight: 900; color: var(--gold); text-shadow: 8px 8px 0px var(--blood); opacity: 0; transition: all 2s ease-out; z-index: 100; }
+        .victory-stamp.active { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+        .subtitle-area { position: absolute; bottom: 18%; left: 50%; transform: translateX(-50%); width: 85%; text-align: center; z-index: 200; opacity: 0; transition: 1s; }
+        .subtitle-area.active { opacity: 1; }
+        .subtitle-area p { font-size: 2.2rem; font-weight: 900; text-shadow: 0 5px 25px #000; border-bottom: 3px solid var(--gold); display: inline-block; }
+        #entry-screen { position: fixed; top:0; left:0; width:100%; height:100%; background: #000; display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 9999; }
+        #play-btn { background: var(--blood); border: 3px solid var(--gold); color: var(--gold); padding: 30px 100px; font-size: 1.5rem; cursor: pointer; font-weight: 900; }
+        .spinner { width: 40px; height: 40px; border: 4px solid #222; border-top-color: var(--gold); border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 20px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        canvas { position: absolute; top:0; left:0; width:100%; height:100%; z-index: 20; pointer-events: none; }
+    </style>
+</head>
+<body>
+<div id="entry-screen">
+    <button id="play-btn" onclick="igniteCinematic()">Begin Revelation</button>
+    <div id="loading-view" style="display:none; text-align:center;">
+        <div class="spinner"></div>
+        <div style="color:#888; font-weight:bold;">SYNCING SCROLLS...</div>
+    </div>
+</div>
+<div id="clip-container">
+    <img id="general-bg" alt="Grand Marshal">
+    <div class="vignette"></div>
+    <canvas id="ember-canvas"></canvas>
+    <div class="victory-stamp" id="main-stamp">大捷</div>
+    <div class="subtitle-area" id="sub-panel"><p id="sub-text"></p></div>
+</div>
+<script>
+    const apiKey = ""; 
+    const quotes = { win: ["这场仗打得痛快！阁下虽败，但英勇盖世。后会有期！", "江山易主，这局我收下了！"], loss: ["棋差一招，老夫甘拜下风！定要再来讨教。", "阁下棋艺精湛，老夫输得心服口服。"] };
+    const stamps = { win: "大捷", loss: "惜败" };
+
+    async function igniteCinematic() {
+        document.getElementById('play-btn').style.display = 'none';
+        document.getElementById('loading-view').style.display = 'block';
+        const urlParams = new URLSearchParams(window.location.search);
+        const res = urlParams.get('result') || 'win'; 
+        const text = quotes[res][Math.floor(Math.random() * quotes[res].length)];
+        document.getElementById('main-stamp').innerText = stamps[res];
+        const music = new Audio('https://assets.mixkit.co/music/preview/mixkit-epic-war-drums-and-percussion-2849.mp3');
+        music.volume = 0.5; music.loop = true; music.play().catch(() => {});
+
+        try {
+            let imgUrl = sessionStorage.getItem('preloaded_general_img');
+            const [audioData, generatedImg] = await Promise.all([
+                fetchVoice(text),
+                imgUrl ? Promise.resolve(imgUrl) : generateImg()
+            ]);
+            const bgImg = document.getElementById('general-bg');
+            bgImg.src = imgUrl || generatedImg;
+            await new Promise(r => bgImg.onload = r);
+            document.getElementById('entry-screen').remove();
+            document.getElementById('clip-container').style.display = 'block';
+            startParticles();
+            bgImg.style.opacity = '1'; bgImg.classList.add('camera-zoom');
+            setTimeout(() => document.getElementById('main-stamp').classList.add('active'), 1200);
+            setTimeout(() => playSync(audioData, text, music), 3500);
+        } catch (e) { console.error(e); }
+    }
+
+    async function generateImg() {
+        const prompt = "Aggressive epic cinematic Manhua ink-wash painting. Chinese general in black armor. 8k movie still.";
+        const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-generate-001:predict?key=${apiKey}`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ instances: { prompt }, parameters: { sampleCount: 1 } }) });
+        const res = await resp.json(); return `data:image/png;base64,${res.predictions[0].bytesBase64Encoded}`;
+    }
+
+    async function fetchVoice(text) {
+        const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${apiKey}`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ contents: [{ parts: [{ text: "Speak this Mandarin powerfully: " + text }] }], generationConfig: { responseModalities: ["AUDIO"], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: "Charon" } } } }, model: "gemini-2.5-flash-preview-tts" }) });
+        const res = await resp.json(); const part = res.candidates[0].content.parts[0];
+        return { base64: part.inlineData.data, sampleRate: parseInt(part.inlineData.mimeType.split('rate=')[1]) || 24000 };
+    }
+
+    function playSync(audio, text, music) {
+        const voice = new Audio(URL.createObjectURL(pcmToWav(audio.base64, audio.sampleRate)));
+        voice.onloadedmetadata = () => {
+            const delay = (voice.duration * 1000 - 400) / text.length;
+            voice.onplay = () => { if (music) music.volume = 0.2; document.getElementById('sub-panel').classList.add('active'); let i=0; const t = setInterval(() => { document.getElementById('sub-text').innerText += text[i++]; if (i >= text.length) clearInterval(t); }, delay); };
+            voice.onended = () => { if (music) music.volume = 0.5; setTimeout(() => { const b = document.createElement('button'); b.innerText = "RETURN TO LOBBY"; b.style.cssText = "position:absolute; bottom:5%; left:50%; transform:translateX(-50%); background:var(--gold); color:#000; border:none; padding:18px 50px; font-weight:900; cursor:pointer; border-radius:12px;"; b.onclick = () => window.location.href = "../lobby/lobby.html"; document.body.appendChild(b); }, 2000); };
+            voice.play();
+        };
+    }
+
+    function pcmToWav(b64, rate) {
+        const bin = atob(b64); const bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        const pcm = new Int16Array(bytes.buffer); const head = new ArrayBuffer(44); const v = new DataView(head);
+        v.setUint32(0, 0x52494646, false); v.setUint32(4, 36 + pcm.length * 2, true); v.setUint32(8, 0x57415645, false);
+        v.setUint32(12, 0x666d7420, false); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+        v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+        v.setUint32(36, 0x64617461, false); v.setUint32(40, pcm.length * 2, true);
+        return new Blob([head, pcm], { type: 'audio/wav' });
+    }
+
+    function startParticles() {
+        const c = document.getElementById('ember-canvas'); const ctx = c.getContext('2d'); c.width = window.innerWidth; c.height = window.innerHeight;
+        const p = []; for(let i=0; i<100; i++) p.push({ x: Math.random() * c.width, y: c.height + 50, r: Math.random() * 3 + 1, vx: Math.random() * 2 - 1, vy: -(Math.random() * 3 + 2), o: Math.random() });
+        (function loop() { ctx.clearRect(0, 0, c.width, c.height); p.forEach(i => { ctx.fillStyle = `rgba(241, 196, 15, ${i.o})`; ctx.beginPath(); ctx.arc(i.x, i.y, i.r, 0, 7); ctx.fill(); i.y += i.vy; i.x += i.vx + Math.sin(i.y / 60); if(i.y < -10) i.y = c.height + 20; }); requestAnimationFrame(loop); })();
+    }
+</script>
+</body>
+</html>

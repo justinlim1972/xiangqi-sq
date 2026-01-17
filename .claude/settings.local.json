@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(powershell Compress-Archive:*)",
+      "Bash(powershell \"Compress-Archive -Path ''E:\\\\FireBase-SG'' -DestinationPath ''E:\\\\FireBase-SG-backup-2026-01-18.zip'' -Force\")",
+      "Bash(powershell \"Test-Path ''E:\\\\FireBase-SG-backup-2026-01-18.zip''\")",
+      "Bash(powershell \"Get-Item ''E:\\\\FireBase-SG-backup-2026-01-18.zip'' | Select-Object Name, Length, LastWriteTime | Format-List\")",
+      "Bash(git cat-file:*)",
+      "Bash(git remote add:*)",
+      "Bash(git add:*)"
+    ]
+  }
+}

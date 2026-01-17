@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SG Xiangqi - Register</title>
+    <style>
+        :root { --primary: #cd3333; --dark: #2c3e50; --bg: #f4f7f6; --gray: #64748b; }
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            background: var(--bg); 
+            display: flex; justify-content: center; align-items: center; 
+            min-height: 100vh; margin: 0; 
+        }
+        .register-card {
+            background: white; padding: 40px; border-radius: 16px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1); width: 100%; max-width: 450px;
+            text-align: center; margin: 20px;
+        }
+
+        /* Logo Styling */
+        .logo-container { margin-bottom: 20px; }
+        .logo-container img {
+            width: 80px; height: 80px; object-fit: contain;
+            filter: drop-shadow(0 4px 6px rgba(0,0,0,0.1));
+        }
+
+        h1 { color: var(--primary); margin-bottom: 5px; font-size: 1.8rem; font-weight: 800; }
+        p.subtitle { color: var(--gray); margin-bottom: 30px; font-size: 0.9rem; }
+        
+        .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; text-align: left; }
+        .form-group { margin-bottom: 18px; }
+        .full-width { grid-column: span 2; }
+        
+        label { display: block; margin-bottom: 6px; font-weight: bold; color: var(--dark); font-size: 0.85rem; }
+        input, select { 
+            width: 100%; padding: 12px; border: 1px solid #ddd; 
+            border-radius: 8px; box-sizing: border-box; font-size: 0.95rem;
+            transition: border-color 0.2s;
+        }
+        input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(205, 51, 51, 0.1); }
+
+        button {
+            width: 100%; padding: 14px; background: var(--primary); color: white;
+            border: none; border-radius: 8px; font-size: 1rem; font-weight: bold;
+            cursor: pointer; transition: all 0.3s;
+            margin-top: 10px;
+        }
+        button:hover { background: #a02828; transform: translateY(-1px); }
+        button:disabled { opacity: 0.6; cursor: not-allowed; }
+
+        .error-msg { color: #e74c3c; margin-top: 15px; font-size: 0.85rem; display: none; background: #fee2e2; padding: 10px; border-radius: 6px; }
+        .footer-link { margin-top: 25px; font-size: 0.9rem; color: var(--gray); }
+        .footer-link a { color: var(--primary); text-decoration: none; font-weight: bold; }
+        
+        .spinner { display: none; width: 20px; height: 20px; border: 3px solid rgba(255,255,255,0.3); border-radius: 50%; border-top-color: #fff; animation: spin 1s infinite linear; margin: 0 auto; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+
+<div class="register-card">
+    <div class="logo-container">
+        <!-- Replaced with direct path. Use pictures/Singapore.png if at root -->
+        <img src="pictures/Singapore.png" alt="SG Logo" onerror="this.style.display='none'">
+    </div>
+    <h1>Create Account</h1>
+    <p class="subtitle">Join the SG Xiangqi community today</p>
+    
+    <div class="form-grid">
+        <div class="form-group full-width">
+            <label>Player Name (Displayed in-game)</label>
+            <input type="text" id="playerName" placeholder="e.g. ChessMaster99" maxlength="15">
+        </div>
+
+        <div class="form-group">
+            <label>Country</label>
+            <select id="country">
+                <option value="Singapore">Singapore</option>
+                <option value="Malaysia">Malaysia</option>
+                <option value="China">China</option>
+                <option value="Vietnam">Vietnam</option>
+                <option value="Other">Other</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label>Email Address</label>
+            <input type="email" id="email" placeholder="name@domain.com">
+        </div>
+
+        <div class="form-group">
+            <label>Password</label>
+            <input type="password" id="password" placeholder="Min 6 characters">
+        </div>
+
+        <div class="form-group">
+            <label>Confirm Password</label>
+            <input type="password" id="confirmPassword" placeholder="Repeat password">
+        </div>
+    </div>
+    
+    <div id="error-box" class="error-msg"></div>
+
+    <button id="register-btn">
+        <span id="btn-text">Register & Start Playing</span>
+        <div id="btn-loader" class="spinner"></div>
+    </button>
+    
+    <div class="footer-link">
+        Already have an account? <a href="index.html">Sign In</a>
+    </div>
+</div>
+
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, createUserWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, doc, getDoc, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    const firebaseConfig = {
+        apiKey: "AIzaSyDq_LECOrc4SY90SyDsBQGmwl-YnUNFIj8",
+        authDomain: "xiangqi-sq.firebaseapp.com",
+        projectId: "xiangqi-sq",
+        storageBucket: "xiangqi-sq.firebasestorage.app",
+        messagingSenderId: "351923336298",
+        appId: "1:351923336298:web:e7278ea095ba085ac4935b"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    const appId = 'sg-xiangqi';
+
+    const registerBtn = document.getElementById('register-btn');
+    const errorBox = document.getElementById('error-box');
+    const btnText = document.getElementById('btn-text');
+    const btnLoader = document.getElementById('btn-loader');
+
+    registerBtn.addEventListener('click', async () => {
+        const playerName = document.getElementById('playerName').value.trim();
+        const country = document.getElementById('country').value;
+        const email = document.getElementById('email').value.trim();
+        const password = document.getElementById('password').value;
+        const confirmPassword = document.getElementById('confirmPassword').value;
+
+        if (!playerName || !email || !password || !confirmPassword) {
+            return showError("Please fill in all fields.");
+        }
+        if (playerName.length < 3) {
+            return showError("Player Name must be at least 3 characters.");
+        }
+        if (password.length < 6) {
+            return showError("Password must be at least 6 characters.");
+        }
+        if (password !== confirmPassword) {
+            return showError("Passwords do not match.");
+        }
+
+        setLoading(true);
+
+        try {
+            // 1. Check for Duplicate Player Name (Requires: artifacts/sg-xiangqi/public/data/usernames READ rule)
+            const nameRef = doc(db, 'artifacts', appId, 'public', 'data', 'usernames', playerName.toLowerCase());
+            const nameSnap = await getDoc(nameRef);
+            
+            if (nameSnap.exists()) {
+                setLoading(false);
+                return showError("This Player Name is already taken.");
+            }
+
+            // 2. Create Firebase User
+            const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+            const user = userCredential.user;
+
+            // 3. Store User Profile Data
+            const profileData = {
+                uid: user.uid,
+                email: email,
+                playerName: playerName,
+                country: country,
+                elo: 1200,
+                gold: 100,
+                role: 'player', // Default role
+                createdAt: serverTimestamp()
+            };
+
+            // Set private profile (Requires: artifacts/sg-xiangqi/users/{uid}/profile/data WRITE rule)
+            await setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'data'), profileData);
+
+            // Set public name registration claim
+            await setDoc(nameRef, { 
+                uid: user.uid, 
+                registeredAt: serverTimestamp() 
+            });
+
+            // Success redirect
+            window.location.href = 'lobby/lobby.html';
+
+        } catch (error) {
+            setLoading(false);
+            console.error("Registration Error:", error);
+            if (error.code === 'auth/email-already-in-use') {
+                showError("This email address is already registered.");
+            } else if (error.message.includes("permission")) {
+                showError("Firebase Permission Error. Please verify your Firestore security rules.");
+            } else {
+                showError(error.message);
+            }
+        }
+    });
+
+    function showError(msg) {
+        errorBox.innerText = msg;
+        errorBox.style.display = "block";
+    }
+
+    function setLoading(isLoading) {
+        registerBtn.disabled = isLoading;
+        btnText.style.display = isLoading ? 'none' : 'block';
+        btnLoader.style.display = isLoading ? 'block' : 'none';
+        errorBox.style.display = "none";
+    }
+</script>
+
+</body>
+</html>
