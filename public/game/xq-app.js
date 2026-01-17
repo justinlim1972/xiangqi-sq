@@ -639,32 +639,38 @@ export class XQApp {
             });
 
             if (g.lastMove && g.lastMove.ts !== this.lastMoveTimestamp) {
+                const isFirstSync = this.lastMoveTimestamp === null;
                 this.lastMoveTimestamp = g.lastMove.ts;
 
-                console.log('🎬 Move animation detected:', {
-                    isCapture: g.lastMove.isCapture,
-                    isCheck: g.lastMove.isCheck,
-                    isCheckmate: g.lastMove.isCheckmate,
-                    isStalemate: g.lastMove.isStalemate,
-                    timestamp: g.lastMove.ts
-                });
+                // Only show animation if this is NOT the first sync (i.e., a real new move)
+                if (!isFirstSync) {
+                    console.log('🎬 Move animation detected:', {
+                        isCapture: g.lastMove.isCapture,
+                        isCheck: g.lastMove.isCheck,
+                        isCheckmate: g.lastMove.isCheckmate,
+                        isStalemate: g.lastMove.isStalemate,
+                        timestamp: g.lastMove.ts
+                    });
 
-                // Show animation for all clients (including the one who made the move)
-                setTimeout(() => {
-                    if (g.lastMove.isCheckmate) {
-                        console.log('🏆 Showing checkmate animation for winner:', g.winner);
-                        this.showMoveAnimation('checkmate', {winner: g.winner});
-                    } else if (g.lastMove.isStalemate) {
-                        console.log('🤝 Showing stalemate animation');
-                        this.showMoveAnimation('stalemate');
-                    } else if (g.lastMove.isCheck) {
-                        console.log('👑 Showing check animation');
-                        this.showMoveAnimation('check');
-                    } else if (g.lastMove.isCapture) {
-                        console.log('⚔️ Showing capture animation');
-                        this.showMoveAnimation('capture');
-                    }
-                }, 200); // Small delay so the piece updates first
+                    // Show animation for all clients (including the one who made the move)
+                    setTimeout(() => {
+                        if (g.lastMove.isCheckmate) {
+                            console.log('🏆 Showing checkmate animation for winner:', g.winner);
+                            this.showMoveAnimation('checkmate', {winner: g.winner});
+                        } else if (g.lastMove.isStalemate) {
+                            console.log('🤝 Showing stalemate animation');
+                            this.showMoveAnimation('stalemate');
+                        } else if (g.lastMove.isCheck) {
+                            console.log('👑 Showing check animation');
+                            this.showMoveAnimation('check');
+                        } else if (g.lastMove.isCapture) {
+                            console.log('⚔️ Showing capture animation');
+                            this.showMoveAnimation('capture');
+                        }
+                    }, 200); // Small delay so the piece updates first
+                } else {
+                    console.log('⏭️ Skipping animation - this is initial page load');
+                }
             }
 
             // Render pieces if game is active
