@@ -252,4 +252,147 @@ export class XQEngine {
         const legalMoves = this.getAllLegalMoves(board, isRed);
         return legalMoves.length === 0;
     }
+
+    /**
+     * Generate a hash string for a board position
+     * Used for detecting position repetitions
+     */
+    getBoardHash(board) {
+        return board.map(row =>
+            row.map(cell => cell || '_').join('')
+        ).join('|');
+    }
+
+    /**
+     * Convert board to FEN notation
+     * @param {Array} board - 2D array representing the board
+     * @param {string} turn - 'red' or 'black'
+     * @returns {string} - FEN string
+     */
+    boardToFEN(board, turn) {
+        let fen = '';
+
+        // Part 1: Board position (top to bottom)
+        for (let y = 0; y < 10; y++) {
+            let emptyCount = 0;
+            for (let x = 0; x < 9; x++) {
+                const piece = board[y][x];
+                if (!piece) {
+                    emptyCount++;
+                } else {
+                    if (emptyCount > 0) {
+                        fen += emptyCount;
+                        emptyCount = 0;
+                    }
+                    fen += piece;
+                }
+            }
+            if (emptyCount > 0) {
+                fen += emptyCount;
+            }
+            if (y < 9) {
+                fen += '/';
+            }
+        }
+
+        // Part 2: Active color
+        fen += turn === 'red' ? ' w' : ' b';
+
+        // Part 3 & 4: Move counters (simplified)
+        fen += ' - - 0 1';
+
+        return fen;
+    }
+
+    /**
+     * Check if a position has been repeated 6 times (6-fold repetition = draw in Xiangqi)
+     * @param {Array} moveHistory - Array of board hashes from previous moves
+     * @param {string} currentHash - Hash of the current board position
+     * @returns {boolean} - True if this position has occurred 6 times
+     */
+    isThreefoldRepetition(moveHistory, currentHash) {
+        if (!moveHistory || moveHistory.length < 5) return false;
+
+        // Count how many times the current position has appeared
+        let count = 1; // Current position counts as 1
+        for (const hash of moveHistory) {
+            if (hash === currentHash) {
+                count++;
+            }
+        }
+
+        return count >= 6;
+    }
+
+    /**
+     * Detect perpetual check (连续将军判负)
+     * If the same player keeps checking the opponent king repeatedly, they lose
+     * @param {Array} moveHistory - Array of recent board hashes with check status
+     * @returns {object|null} - {loser: 'red'|'black'} if perpetual check detected, null otherwise
+     */
+    isPerpetualCheck(moveHistory) {
+        // Need at least 6 moves to detect perpetual check (3 consecutive checks)
+        if (!moveHistory || moveHistory.length < 6) return null;
+
+        // Look at the last 6 moves
+        const recent = moveHistory.slice(-6);
+
+        // Check if all 6 moves involved the same player giving check
+        const checksBy = recent.filter(m => m.isCheck);
+        if (checksBy.length < 3) return null;
+
+        // If the last 3 moves all gave check and came from the same player
+        const lastThree = moveHistory.slice(-3);
+        const allChecks = lastThree.every(m => m.isCheck);
+
+        if (allChecks) {
+            // The player giving check loses
+            // Last move was by the checking player
+            const loser = lastThree[lastThree.length - 1].movedBy;
+            console.log('🚫 Perpetual check detected! Checking player loses:', loser);
+            return { loser };
+        }
+
+        return null;
+    }
+
+    /**
+     * Detect perpetual chase (长捉判负)
+     * If a player keeps chasing the same piece without capturing, they lose
+     * This is a simplified version - full implementation would track specific piece threats
+     * @param {Array} moveHistory - Array of recent moves with positions
+     * @returns {object|null} - {loser: 'red'|'black'} if perpetual chase detected, null otherwise
+     */
+    isPerpetualChase(moveHistory) {
+        // This is a simplified implementation
+        // A full implementation would need to track:
+        // 1. Which piece is being "chased" (threatened but not captured)
+        // 2. Whether the same piece is under threat repeatedly
+        // 3. Whether the chasing player has other options
+
+        // For now, we'll detect if the same 2 board positions alternate 3+ times
+        // (indicating a repetitive chase pattern)
+        if (!moveHistory || moveHistory.length < 8) return null;
+
+        const recent = moveHistory.slice(-8);
+        const hashes = recent.map(m => m.boardHash);
+
+        // Check for ABAB pattern (position A, then B, then A, then B)
+        let patternCount = 0;
+        for (let i = 0; i < hashes.length - 3; i += 2) {
+            if (hashes[i] === hashes[i + 2] && hashes[i + 1] === hashes[i + 3]) {
+                patternCount++;
+            }
+        }
+
+        // If we see the ABAB pattern 2+ times, it's likely perpetual chase
+        if (patternCount >= 2) {
+            // The player who keeps repeating loses
+            const loser = recent[recent.length - 1].movedBy;
+            console.log('🚫 Perpetual chase detected! Chasing player loses:', loser);
+            return { loser };
+        }
+
+        return null;
+    }
 }

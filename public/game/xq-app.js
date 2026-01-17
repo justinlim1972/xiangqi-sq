@@ -65,11 +65,30 @@ export class XQApp {
         // Track last move timestamp to avoid duplicate animations
         this.lastMoveTimestamp = null;
         this.hasCompletedFirstSync = false; // Track if we've completed the initial page load sync
+        this.lastResignationTimestamp = null; // Track resignation timestamp to avoid duplicate animations
 
         // Game timer properties (15 minutes per player)
         this.timerInterval = null;
         this.redTimeLeft = 15 * 60; // 15 minutes in seconds
         this.blackTimeLeft = 15 * 60;
+
+        // Settings (load from localStorage)
+        this.settings = {
+            sound: localStorage.getItem('xq-setting-sound') !== 'false', // default ON
+            animation: localStorage.getItem('xq-setting-animation') !== 'false', // default ON
+            autosave: localStorage.getItem('xq-setting-autosave') !== 'false', // default ON
+            music: localStorage.getItem('xq-setting-music') !== 'false' // default ON
+        };
+
+        // Ambient music system
+        this.ambientMusic = null;
+        this.musicTracks = [
+            '/music/beyond-by-onycs.mp3',
+            '/music/dreamcatcher-by-onycs.mp3',
+            '/music/paradise-by-onycs.mp3'
+        ];
+        // Start from random track each time
+        this.currentTrackIndex = Math.floor(Math.random() * this.musicTracks.length);
 
         this.hasJoined = false;
         window.addEventListener('beforeunload', () => this.leaveRoom());
@@ -358,7 +377,10 @@ export class XQApp {
             console.log('  Red Player:', this.table.playerRed?.uid);
             console.log('  Black Player:', this.table.playerBlack?.uid);
             console.log('  Battle Request:', this.table.battleRequest);
-            console.log('═══════════════════════════════════════'); 
+            console.log('═══════════════════════════════════════');
+
+            // Handle ambient music based on occupant count
+            this.handleMusicOnOccupantsChange();
 
             // Update player displays
             document.getElementById('name-red').innerText = this.table.playerRed?.name || 'Empty Slot';
@@ -631,6 +653,13 @@ export class XQApp {
                 log.scrollTop = log.scrollHeight;
             }
 
+            // Auto-update MOVES tab if it's active
+            const movesTab = document.getElementById('tab-content-moves');
+            if (movesTab && movesTab.classList.contains('active')) {
+                this.updateFENDisplay();
+                this.updateMoveHistory();
+            }
+
             // Check for move animations (lastMove changed)
             console.log('🔍 Checking lastMove:', {
                 hasLastMove: !!g.lastMove,
@@ -673,22 +702,54 @@ export class XQApp {
 
                     // Show animation for all clients (including the one who made the move)
                     setTimeout(() => {
-                        if (g.lastMove.isCheckmate) {
+                        // Check game status for special endings
+                        if (g.status === 'draw') {
+                            console.log('🔁 Showing 3-fold repetition draw animation');
+                            this.showMoveAnimation('draw');
+                        } else if (g.status === 'finished' && g.reason === 'resignation' && g.winner) {
+                            console.log('🏳️ Showing resignation animation for winner:', g.winner);
+                            this.showMoveAnimation('resignation', {winner: g.winner});
+                        } else if (g.status === 'perpetual-check') {
+                            console.log('♾️ Showing perpetual check animation, winner:', g.winner);
+                            this.showMoveAnimation('perpetual-check', {winner: g.winner});
+                        } else if (g.status === 'perpetual-chase') {
+                            console.log('♾️ Showing perpetual chase animation, winner:', g.winner);
+                            this.showMoveAnimation('perpetual-chase', {winner: g.winner});
+                        } else if (g.lastMove && g.lastMove.isCheckmate) {
                             console.log('🏆 Showing checkmate animation for winner:', g.winner);
                             this.showMoveAnimation('checkmate', {winner: g.winner});
-                        } else if (g.lastMove.isStalemate) {
+                        } else if (g.lastMove && g.lastMove.isStalemate) {
                             console.log('🤝 Showing stalemate animation');
                             this.showMoveAnimation('stalemate');
-                        } else if (g.lastMove.isCheck) {
+                        } else if (g.lastMove && g.lastMove.isCheck) {
                             console.log('👑 Showing check animation');
                             this.showMoveAnimation('check');
-                        } else if (g.lastMove.isCapture) {
+                        } else if (g.lastMove && g.lastMove.isCapture) {
                             console.log('⚔️ Showing capture animation');
                             this.showMoveAnimation('capture');
                         }
                     }, 200); // Small delay so the piece updates first
                 } else {
                     console.log('⏭️ Skipping animation - stale move from completed game (age: ' + Math.round(moveAge/1000) + 's)');
+                }
+            }
+
+            // Check for game-ending statuses that don't involve a move (like resignation)
+            if (g.status === 'finished' && g.reason === 'resignation' && g.winner) {
+                // Use finishedAt timestamp to track if we've already shown this resignation
+                const resignationTimestamp = g.finishedAt || Date.now();
+
+                if (resignationTimestamp !== this.lastResignationTimestamp) {
+                    console.log('🏳️ Detected NEW resignation - showing animation for winner:', g.winner);
+                    console.log('   Resignation timestamp:', resignationTimestamp);
+                    console.log('   Last shown resignation:', this.lastResignationTimestamp);
+
+                    this.lastResignationTimestamp = resignationTimestamp;
+                    setTimeout(() => {
+                        this.showMoveAnimation('resignation', {winner: g.winner});
+                    }, 200);
+                } else {
+                    console.log('⏭️ Skipping resignation animation - already shown for this game ending');
                 }
             }
 
@@ -1211,6 +1272,7 @@ export class XQApp {
                 board: null,
                 status: 'waiting',
                 history: [],
+                moveHistory: [], // Clear move history for repetition detection
                 turn: 'red'
             }, { merge: true });
             updates.matchActive = false;
@@ -1219,6 +1281,9 @@ export class XQApp {
         await setDoc(tRef, updates, { merge: true });
         console.log('✅ Left room successfully');
         this.hasJoined = false;
+
+        // Stop music when I leave (will be stopped by occupants change too, but this is immediate)
+        this.stopAmbientMusic();
     }
 
     async handleExit() {
@@ -1301,6 +1366,7 @@ export class XQApp {
                 status: 'playing',
                 turn: 'red',
                 history: [],
+                moveHistory: [], // Clear move history for repetition detection
                 chat: arrayUnion({
                     user: 'SYSTEM',
                     text: '⚔️ Battle has begun! Red moves first.',
@@ -1427,6 +1493,32 @@ export class XQApp {
         const isCheckmate = isCheck && this.engine.isCheckmate(newBoard, opponentIsRed);
         const isStalemate = !isCheck && this.engine.isStalemate(newBoard, opponentIsRed);
 
+        // Generate board hash for repetition detection
+        const boardHash = this.engine.getBoardHash(newBoard);
+
+        // Get move history from game state
+        const currentHistory = this.gameState.moveHistory || [];
+
+        // Create move record for history tracking
+        const moveRecord = {
+            boardHash: boardHash,
+            movedBy: this.gameState.turn, // Who made this move
+            isCheck: isCheck,
+            ts: Date.now()
+        };
+
+        // Check for 3-fold repetition
+        const isRepetition = this.engine.isThreefoldRepetition(
+            currentHistory.map(m => m.boardHash),
+            boardHash
+        );
+
+        // Check for perpetual check
+        const perpetualCheck = this.engine.isPerpetualCheck([...currentHistory, moveRecord]);
+
+        // Check for perpetual chase
+        const perpetualChase = this.engine.isPerpetualChase([...currentHistory, moveRecord]);
+
         // Flatten board for Firebase (convert null to empty string)
         const flatBoard = newBoard.map(row =>
             row.map(cell => cell === null ? '' : cell).join(',')
@@ -1446,9 +1538,11 @@ export class XQApp {
 
         // Save to Firebase with move metadata for animations
         const gameRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'games', this.tid);
+        const movedPiece = this.gameState.board[fromY][fromX];
         const moveData = {
             from: {x: fromX, y: fromY},
             to: {x: toX, y: toY},
+            piece: movedPiece, // Add piece type for notation
             isCapture: isCapture,
             capturedPiece: capturedPiece,
             isCheck: isCheck,
@@ -1468,6 +1562,18 @@ export class XQApp {
         } else if (isStalemate) {
             newStatus = 'stalemate';
             // NOTE: Don't show animation here - Firebase sync will trigger it for ALL clients
+        } else if (isRepetition) {
+            newStatus = 'draw';
+            winner = null;
+            console.log('🔁 3-fold repetition detected! Game is a draw.');
+        } else if (perpetualCheck) {
+            newStatus = 'perpetual-check';
+            winner = perpetualCheck.loser === 'red' ? 'black' : 'red'; // Opponent wins
+            console.log('♾️ Perpetual check detected! Player', perpetualCheck.loser, 'loses.');
+        } else if (perpetualChase) {
+            newStatus = 'perpetual-chase';
+            winner = perpetualChase.loser === 'red' ? 'black' : 'red'; // Opponent wins
+            console.log('♾️ Perpetual chase detected! Player', perpetualChase.loser, 'loses.');
         }
         // NOTE: Check animation will also be triggered by Firebase sync
 
@@ -1475,7 +1581,8 @@ export class XQApp {
             board: flatBoard,
             turn: nextTurn,
             lastMove: moveData,
-            history: arrayUnion(moveData)
+            history: arrayUnion(moveData),
+            moveHistory: arrayUnion(moveRecord) // Track board positions for repetition detection
         };
 
         if (newStatus !== 'playing') {
@@ -1711,6 +1818,9 @@ export class XQApp {
      * Play a sound effect
      */
     playSound(soundName) {
+        // Check if sounds are enabled
+        if (!this.settings.sound) return;
+
         if (this.sounds[soundName] && typeof this.sounds[soundName] === 'function') {
             this.sounds[soundName]();
         }
@@ -1720,6 +1830,9 @@ export class XQApp {
      * Generate Chinese TTS speech and play it
      */
     async playChineseTTS(text) {
+        // Check if sounds are enabled
+        if (!this.settings.sound) return;
+
         // Using a simple approach - you already have TTS in victory_clip.html
         // For now, let's use the browser's built-in speech synthesis as a fallback
         try {
@@ -1741,6 +1854,17 @@ export class XQApp {
      */
     async showMoveAnimation(type, data = {}) {
         console.log('🎭 showMoveAnimation called:', type, data);
+
+        // Show game-over image even if animations are disabled (for all game-ending results)
+        if ((type === 'checkmate' || type === 'perpetual-check' || type === 'perpetual-chase' || type === 'resignation') && data.winner) {
+            this.showGameOverImage(data.winner);
+        }
+
+        // Check if animations are enabled for the sidebar animation
+        if (!this.settings.animation) {
+            console.log('⏭️ Animations disabled by user settings');
+            return;
+        }
 
         const animationEl = document.getElementById('move-animation');
         const iconEl = document.getElementById('move-animation-icon');
@@ -1781,7 +1905,7 @@ export class XQApp {
                 chinese = `绝杀！无解\n${winner}`;
                 english = `CHECKMATE!\n${winnerEn}`;
                 sound = `绝杀！无解 ${winner}`;
-                duration = 4000;
+                duration = 5000; // Extended to 5 seconds to match image display
                 chineseEl.style.fontSize = '2rem'; // Smaller for multi-line
                 chineseEl.style.whiteSpace = 'pre-line';
                 englishEl.style.whiteSpace = 'pre-line';
@@ -1793,14 +1917,51 @@ export class XQApp {
                 sound = '和棋';
                 duration = 3000;
                 break;
-            case 'perpetual-check':
-                icon = '⚠️';
-                chinese = '连续将军判负\nPerpetual Check - Loss';
-                english = `${data.loser === 'red' ? 'RED' : 'BLACK'} LOSES`;
-                sound = '连续将军判负';
-                duration = 3000;
-                chineseEl.style.fontSize = '1.5rem';
+            case 'draw':
+                icon = '🔁';
+                chinese = '三次重复局面\n和棋';
+                english = '3-FOLD REPETITION\nDRAW';
+                sound = '三次重复局面 和棋';
+                duration = 3500;
+                chineseEl.style.fontSize = '1.8rem';
                 chineseEl.style.whiteSpace = 'pre-line';
+                englishEl.style.whiteSpace = 'pre-line';
+                break;
+            case 'perpetual-check':
+                const perpetualCheckWinner = data.winner === 'red' ? '红胜' : '黑胜';
+                const perpetualCheckWinnerEn = data.winner === 'red' ? 'RED WINS' : 'BLACK WINS';
+                icon = '♾️';
+                chinese = `连续将军判负\n${perpetualCheckWinner}`;
+                english = `PERPETUAL CHECK\n${perpetualCheckWinnerEn}`;
+                sound = `连续将军判负 ${perpetualCheckWinner}`;
+                duration = 5000; // Extended to 5 seconds to match image display
+                chineseEl.style.fontSize = '1.8rem';
+                chineseEl.style.whiteSpace = 'pre-line';
+                englishEl.style.whiteSpace = 'pre-line';
+                break;
+            case 'perpetual-chase':
+                const perpetualChaseWinner = data.winner === 'red' ? '红胜' : '黑胜';
+                const perpetualChaseWinnerEn = data.winner === 'red' ? 'RED WINS' : 'BLACK WINS';
+                icon = '♾️';
+                chinese = `长捉判负\n${perpetualChaseWinner}`;
+                english = `PERPETUAL CHASE\n${perpetualChaseWinnerEn}`;
+                sound = `长捉判负 ${perpetualChaseWinner}`;
+                duration = 5000; // Extended to 5 seconds to match image display
+                chineseEl.style.fontSize = '1.8rem';
+                chineseEl.style.whiteSpace = 'pre-line';
+                englishEl.style.whiteSpace = 'pre-line';
+                break;
+            case 'resignation':
+                const resignationWinner = data.winner === 'red' ? '红胜' : '黑胜';
+                const resignationWinnerEn = data.winner === 'red' ? 'RED WINS' : 'BLACK WINS';
+                icon = '🏳️';
+                chinese = `对手认输\n${resignationWinner}`;
+                english = `RESIGNATION\n${resignationWinnerEn}`;
+                sound = `对手认输 ${resignationWinner}`;
+                duration = 5000; // Extended to 5 seconds to match image display
+                chineseEl.style.fontSize = '2rem';
+                chineseEl.style.whiteSpace = 'pre-line';
+                englishEl.style.whiteSpace = 'pre-line';
                 break;
             default:
                 return;
@@ -1827,5 +1988,457 @@ export class XQApp {
             chineseEl.style.whiteSpace = 'normal';
             englishEl.style.whiteSpace = 'normal';
         }, duration);
+    }
+
+    /**
+     * Show game over image overlay on chess board
+     * @param {string} winner - 'red' or 'black'
+     */
+    showGameOverImage(winner) {
+        console.log('🎬 showGameOverImage called with winner:', winner);
+
+        const overlayEl = document.getElementById('game-over-overlay');
+        const imageEl = document.getElementById('game-over-image');
+
+        console.log('🖼️ Overlay element:', overlayEl);
+        console.log('🖼️ Image element:', imageEl);
+
+        if (!overlayEl || !imageEl) {
+            console.error('❌ Game over overlay elements not found!');
+            console.error('   overlayEl:', overlayEl);
+            console.error('   imageEl:', imageEl);
+            return;
+        }
+
+        // Determine which image to show
+        // If red wins, black loses (show Black_Lose.png)
+        // If black wins, red loses (show Red_Lose.png)
+        const imagePath = winner === 'red'
+            ? '/pictures/Black_Lose.png'
+            : '/pictures/Red_Lose.png';
+
+        console.log('🖼️ Setting image path to:', imagePath);
+        console.log('🖼️ Current overlay classes:', overlayEl.className);
+        console.log('🖼️ Current overlay style.opacity:', overlayEl.style.opacity);
+        console.log('🖼️ Current overlay style.visibility:', overlayEl.style.visibility);
+
+        // Set image source and show overlay with class
+        imageEl.src = imagePath;
+
+        // Add show class
+        overlayEl.classList.add('show');
+
+        console.log('✅ Added "show" class to overlay');
+        console.log('🖼️ Updated overlay classes:', overlayEl.className);
+        console.log('🖼️ Computed opacity:', window.getComputedStyle(overlayEl).opacity);
+        console.log('🖼️ Computed visibility:', window.getComputedStyle(overlayEl).visibility);
+
+        // Hide overlay after 10 seconds
+        setTimeout(() => {
+            overlayEl.classList.remove('show');
+            console.log('🎬 Game over image hidden - removed "show" class');
+        }, 10000);
+    }
+
+    /**
+     * Switch sidebar tab
+     */
+    switchTab(tabName) {
+        // Hide all tabs
+        document.querySelectorAll('.tab-content').forEach(tab => {
+            tab.classList.remove('active');
+            tab.style.display = 'none';
+        });
+        document.querySelectorAll('.sidebar-tab').forEach(btn => {
+            btn.classList.remove('active');
+        });
+
+        // Show selected tab
+        const tabContent = document.getElementById(`tab-content-${tabName}`);
+        const tabBtn = document.getElementById(`tab-btn-${tabName}`);
+
+        if (tabContent) {
+            tabContent.classList.add('active');
+            tabContent.style.display = 'flex';
+        }
+        if (tabBtn) {
+            tabBtn.classList.add('active');
+        }
+
+        // Update FEN and moves if switching to MOVES tab
+        if (tabName === 'moves') {
+            this.updateFENDisplay();
+            this.updateMoveHistory();
+        }
+    }
+
+    /**
+     * Update FEN display
+     */
+    updateFENDisplay() {
+        const fenDisplay = document.getElementById('fen-display');
+        if (!fenDisplay || !this.gameState?.board) return;
+
+        const fen = this.engine.boardToFEN(this.gameState.board, this.gameState.turn);
+        fenDisplay.textContent = fen;
+    }
+
+    /**
+     * Update move history display
+     */
+    updateMoveHistory() {
+        const historyList = document.getElementById('move-history-list');
+        if (!historyList) return;
+
+        const history = this.gameState?.history || [];
+
+        if (history.length === 0) {
+            historyList.innerHTML = '<div style="text-align: center; color: #666; padding: 40px 20px; font-size: 0.8rem;">No moves yet. Game will begin once both players are seated.</div>';
+            return;
+        }
+
+        // Group moves by round (2 moves = 1 round)
+        let html = '<div style="display: grid; grid-template-columns: 50px 1fr 1fr; gap: 8px; font-family: \'Courier New\', monospace; font-size: 0.75rem;">';
+        html += '<div style="font-weight: 900; color: var(--gold); padding-bottom: 8px; border-bottom: 1px solid #333;">Round</div>';
+        html += '<div style="font-weight: 900; color: var(--gold); padding-bottom: 8px; border-bottom: 1px solid #333;">Red</div>';
+        html += '<div style="font-weight: 900; color: var(--gold); padding-bottom: 8px; border-bottom: 1px solid #333;">Black</div>';
+
+        for (let i = 0; i < history.length; i += 2) {
+            const round = Math.floor(i / 2) + 1;
+            const redMove = history[i];
+            const blackMove = history[i + 1];
+
+            html += `<div style="color: #888; padding: 4px 0;">${round}</div>`;
+            html += `<div style="color: #fff; padding: 4px 0;">${this.formatMoveNotation(redMove)}</div>`;
+            html += `<div style="color: #fff; padding: 4px 0;">${blackMove ? this.formatMoveNotation(blackMove) : '...'}</div>`;
+        }
+        html += '</div>';
+
+        historyList.innerHTML = html;
+    }
+
+    /**
+     * Format move to algebraic notation (e.g., C25, H8+7, R9-1)
+     * Format: [Piece][SourceFile][Direction][Steps/TargetFile]
+     * - Lateral: C25 = Cannon from file 2 to file 5
+     * - Forward: H8+7 = Horse at file 8 moves forward 7 steps
+     * - Backward: R9-1 = Rook at file 9 moves backward 1 step
+     *
+     * IMPORTANT: File numbering in Xiangqi is right-to-left from each player's perspective
+     * - Red: file 1 is on the right (x=8), file 9 is on the left (x=0)
+     * - Black: file 1 is on the right (x=0), file 9 is on the left (x=8)
+     */
+    formatMoveNotation(move) {
+        if (!move || !move.from || !move.to) return '???';
+
+        const fx = move.from.x;
+        const fy = move.from.y;
+        const tx = move.to.x;
+        const ty = move.to.y;
+
+        // Get piece letter from the move data
+        let pieceLetter = '';
+        let isRed = true; // Default to red if we can't determine
+
+        if (move.piece) {
+            const pieceMap = {
+                'r': 'R', 'n': 'H', 'e': 'E', 'a': 'A', 'k': 'K', 'c': 'C', 'p': 'P',
+                'R': 'R', 'N': 'H', 'E': 'E', 'A': 'A', 'K': 'K', 'C': 'C', 'P': 'P'
+            };
+            pieceLetter = pieceMap[move.piece] || '';
+            // Determine if piece is red or black from the piece character
+            isRed = move.piece === move.piece.toUpperCase();
+        } else {
+            // Old move without piece data - infer from starting position
+            // Red starts from bottom (y >= 7), Black starts from top (y <= 2)
+            // For moves in between, we need to guess from the move pattern
+            if (fy >= 7) {
+                isRed = true;
+            } else if (fy <= 2) {
+                isRed = false;
+            } else {
+                // For middle positions, check if moving forward (toward opponent)
+                // Red moves up (y decreases), Black moves down (y increases)
+                isRed = ty < fy; // If y decreased, likely Red moving forward
+            }
+        }
+
+        // Convert coordinates to file numbers (1-9)
+        // Red counts right-to-left: x=8 is file 1, x=0 is file 9
+        // Black counts right-to-left from their side: x=0 is file 1, x=8 is file 9
+        let sourceFile, targetFile;
+        if (isRed) {
+            sourceFile = 9 - fx; // x=8 -> file 1, x=0 -> file 9
+            targetFile = 9 - tx;
+        } else {
+            sourceFile = fx + 1; // x=0 -> file 1, x=8 -> file 9
+            targetFile = tx + 1;
+        }
+
+        let notation = '';
+
+        // Determine direction based on color
+        // Red moves from bottom to top (y decreases)
+        // Black moves from top to bottom (y increases)
+
+        // For Horse (H), Elephant (E), Advisor (A): always show target file with +/-
+        // For Rook (R), Cannon (C): show steps for vertical, target file for lateral
+        // For Pawn (P): show steps for vertical (never -), target file for lateral
+        const piecesWithTargetFile = ['H', 'E', 'A'];
+        const usesTargetFile = piecesWithTargetFile.includes(pieceLetter);
+
+        // Check for vertical movement first (takes priority)
+        if (ty !== fy) {
+            // Has vertical component
+            if (isRed) {
+                if (ty < fy) {
+                    // Forward (toward black side, y decreases)
+                    const suffix = usesTargetFile ? targetFile : Math.abs(ty - fy);
+                    notation = `${pieceLetter}${sourceFile}+${suffix}`;
+                } else {
+                    // Backward (toward own side, y increases)
+                    const suffix = usesTargetFile ? targetFile : Math.abs(ty - fy);
+                    notation = `${pieceLetter}${sourceFile}-${suffix}`;
+                }
+            } else {
+                // Black
+                if (ty > fy) {
+                    // Forward (toward red side, y increases)
+                    const suffix = usesTargetFile ? targetFile : Math.abs(ty - fy);
+                    notation = `${pieceLetter}${sourceFile}+${suffix}`;
+                } else {
+                    // Backward (toward own side, y decreases)
+                    const suffix = usesTargetFile ? targetFile : Math.abs(ty - fy);
+                    notation = `${pieceLetter}${sourceFile}-${suffix}`;
+                }
+            }
+        } else if (tx !== fx) {
+            // Pure lateral move (no vertical component)
+            notation = `${pieceLetter}${sourceFile}${targetFile}`;
+        } else {
+            // No movement? Should not happen
+            notation = `${pieceLetter}${sourceFile}`;
+        }
+
+        return notation;
+    }
+
+    /**
+     * Copy FEN to clipboard
+     */
+    copyFEN() {
+        const fenDisplay = document.getElementById('fen-display');
+        if (!fenDisplay) return;
+
+        const fen = fenDisplay.textContent;
+        navigator.clipboard.writeText(fen).then(() => {
+            this.showStatus('FEN copied to clipboard!', '#27ae60');
+        }).catch(err => {
+            console.error('Failed to copy FEN:', err);
+            this.showStatus('Failed to copy FEN', 'red');
+        });
+    }
+
+    /**
+     * Export game as PGN file
+     */
+    exportPGN() {
+        const history = this.gameState?.history || [];
+        if (history.length === 0) {
+            this.showStatus('No moves to export!', 'red');
+            return;
+        }
+
+        // Build PGN content
+        const date = new Date().toISOString().split('T')[0].replace(/-/g, '.');
+        const redPlayer = this.table?.playerRed?.playerName || 'Red Player';
+        const blackPlayer = this.table?.playerBlack?.playerName || 'Black Player';
+
+        let result = '*'; // Ongoing
+        if (this.gameState.status === 'checkmate' || this.gameState.status === 'perpetual-check' || this.gameState.status === 'perpetual-chase') {
+            result = this.gameState.winner === 'red' ? '1-0' : '0-1';
+        } else if (this.gameState.status === 'draw' || this.gameState.status === 'stalemate') {
+            result = '1/2-1/2';
+        }
+
+        let pgn = `[Event "SG Xiangqi Match"]\n`;
+        pgn += `[Site "xiangqi-sq.web.app"]\n`;
+        pgn += `[Date "${date}"]\n`;
+        pgn += `[Round "1"]\n`;
+        pgn += `[Red "${redPlayer}"]\n`;
+        pgn += `[Black "${blackPlayer}"]\n`;
+        pgn += `[Result "${result}"]\n\n`;
+
+        // Add moves
+        for (let i = 0; i < history.length; i += 2) {
+            const round = Math.floor(i / 2) + 1;
+            const redMove = this.formatMoveNotation(history[i]);
+            const blackMove = history[i + 1] ? this.formatMoveNotation(history[i + 1]) : '';
+
+            pgn += `${round}. ${redMove} ${blackMove}\n`;
+        }
+
+        pgn += `${result}\n`;
+
+        // Download as file
+        const blob = new Blob([pgn], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `xiangqi-game-${date}.pgn`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        this.showStatus('Game exported as PGN!', '#27ae60');
+
+        // Auto-save to localStorage and Firestore if enabled
+        if (this.settings.autosave) {
+            this.saveGameToStorage(pgn);
+        }
+    }
+
+    /**
+     * Save game to LocalStorage and Firestore
+     */
+    async saveGameToStorage(pgn) {
+        const gameId = this.tid;
+        const timestamp = Date.now();
+        const gameData = {
+            id: gameId,
+            pgn: pgn,
+            timestamp: timestamp,
+            redPlayer: this.table?.playerRed?.playerName || 'Red Player',
+            blackPlayer: this.table?.playerBlack?.playerName || 'Black Player',
+            result: this.gameState?.status || 'ongoing'
+        };
+
+        // Save to LocalStorage
+        try {
+            const savedGames = JSON.parse(localStorage.getItem('xq-saved-games') || '[]');
+            savedGames.push(gameData);
+            // Keep only last 50 games
+            if (savedGames.length > 50) savedGames.shift();
+            localStorage.setItem('xq-saved-games', JSON.stringify(savedGames));
+            console.log('Game saved to LocalStorage');
+        } catch (e) {
+            console.error('Failed to save to LocalStorage:', e);
+        }
+
+        // Save to Firestore (user profile)
+        if (this.user) {
+            try {
+                const userGamesRef = doc(this.db, 'artifacts', this.appId, 'users', this.user.uid, 'games', gameId);
+                await setDoc(userGamesRef, gameData);
+                console.log('Game saved to Firestore');
+            } catch (e) {
+                console.error('Failed to save to Firestore:', e);
+            }
+        }
+    }
+
+    /**
+     * Change setting
+     */
+    setSetting(settingName, value) {
+        this.settings[settingName] = value;
+        localStorage.setItem(`xq-setting-${settingName}`, value);
+
+        // Update UI
+        const onBtn = document.getElementById(`setting-${settingName}-on`);
+        const offBtn = document.getElementById(`setting-${settingName}-off`);
+
+        if (value) {
+            onBtn?.classList.add('active');
+            offBtn?.classList.remove('active');
+        } else {
+            onBtn?.classList.remove('active');
+            offBtn?.classList.add('active');
+        }
+
+        this.showStatus(`${settingName.charAt(0).toUpperCase() + settingName.slice(1)} ${value ? 'enabled' : 'disabled'}`, value ? '#27ae60' : '#888');
+
+        // If music setting changed, handle music accordingly
+        if (settingName === 'music') {
+            if (value && this.occupants && this.occupants.length > 0) {
+                this.startAmbientMusic();
+            } else if (!value) {
+                this.stopAmbientMusic();
+            }
+        }
+    }
+
+    /**
+     * Ambient Music Control - Sequential Playback
+     */
+    startAmbientMusic() {
+        // Don't start if music is disabled
+        if (!this.settings.music) return;
+
+        // Don't restart if already playing
+        if (this.ambientMusic && !this.ambientMusic.paused) return;
+
+        // Get current track
+        const currentTrack = this.musicTracks[this.currentTrackIndex];
+
+        // Create or reuse audio element
+        if (!this.ambientMusic) {
+            this.ambientMusic = new Audio(currentTrack);
+            this.ambientMusic.volume = 0.3; // 30% volume for ambient background
+
+            // When song ends, play next track
+            this.ambientMusic.addEventListener('ended', () => {
+                console.log('🎵 Song ended, playing next track...');
+                this.playNextTrack();
+            });
+        } else {
+            this.ambientMusic.src = currentTrack;
+        }
+
+        // Play music
+        this.ambientMusic.play().catch(err => {
+            console.log('🎵 Music autoplay blocked (browser policy):', err.message);
+            // This is expected on page load - music will start on first user interaction
+        });
+
+        console.log('🎵 Ambient music started:', currentTrack, `(Track ${this.currentTrackIndex + 1}/${this.musicTracks.length})`);
+    }
+
+    playNextTrack() {
+        // Move to next track (loop back to start after last track)
+        this.currentTrackIndex = (this.currentTrackIndex + 1) % this.musicTracks.length;
+
+        const nextTrack = this.musicTracks[this.currentTrackIndex];
+        console.log('🎵 Loading next track:', nextTrack, `(Track ${this.currentTrackIndex + 1}/${this.musicTracks.length})`);
+
+        if (this.ambientMusic) {
+            this.ambientMusic.src = nextTrack;
+            this.ambientMusic.play().catch(err => {
+                console.error('🎵 Error playing next track:', err);
+            });
+        }
+    }
+
+    stopAmbientMusic() {
+        if (this.ambientMusic) {
+            this.ambientMusic.pause();
+            this.ambientMusic.currentTime = 0;
+            console.log('🎵 Ambient music stopped');
+        }
+    }
+
+    handleMusicOnOccupantsChange() {
+        const occupantCount = this.occupants?.length || 0;
+
+        console.log('🎵 Music check - Occupants:', occupantCount, 'Music enabled:', this.settings.music);
+
+        if (occupantCount > 0 && this.settings.music) {
+            // Room has people and music is on - start music
+            this.startAmbientMusic();
+        } else if (occupantCount === 0) {
+            // Room is empty - stop music
+            this.stopAmbientMusic();
+        }
     }
 }
