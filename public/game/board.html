@@ -371,6 +371,15 @@
             </div>
         </div>
 
+        <!-- Move Animation Overlay (appears for captures, checks, checkmate) -->
+        <div id="move-animation" style="display: none; margin-top: 10px; background: #0a0a0a; border: 3px solid var(--gold); border-radius: 15px; padding: 20px;">
+            <div style="text-align: center;">
+                <div id="move-animation-icon" style="font-size: 2.5rem; margin-bottom: 8px;">⚔️</div>
+                <h2 id="move-animation-chinese" style="color: var(--gold); font-size: 2.5rem; margin-bottom: 8px; font-weight: 900; letter-spacing: 3px; text-shadow: 0 0 20px rgba(241, 196, 15, 0.8);">吃</h2>
+                <p id="move-animation-english" style="color: #eee; font-size: 1rem; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;">CAPTURE</p>
+            </div>
+        </div>
+
         <!-- Emergency Reset (only shows if stuck) -->
         <button id="btn-reset-match" class="btn-action" style="display:none; background:#666; margin-top: 5px;">⚠️ RESET MATCH</button>
     </div>

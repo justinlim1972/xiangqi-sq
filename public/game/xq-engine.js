@@ -182,4 +182,74 @@ export class XQEngine {
         }
         return false;
     }
+
+    /**
+     * Check if a king is currently in check
+     */
+    isInCheck(board, isRed) {
+        const kingPos = this.findKing(board, isRed);
+        if (!kingPos) return false;
+
+        // Check if any opponent piece can attack the king
+        for (let y = 0; y < 10; y++) {
+            for (let x = 0; x < 9; x++) {
+                const piece = board[y][x];
+                if (!piece) continue;
+
+                const pieceIsRed = piece === piece.toUpperCase();
+                if (pieceIsRed === isRed) continue; // Same color, skip
+
+                if (this.canAttack(board, x, y, kingPos.x, kingPos.y)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Get all legal moves for a color
+     */
+    getAllLegalMoves(board, isRed) {
+        const allMoves = [];
+
+        for (let y = 0; y < 10; y++) {
+            for (let x = 0; x < 9; x++) {
+                const piece = board[y][x];
+                if (!piece) continue;
+
+                const pieceIsRed = piece === piece.toUpperCase();
+                if (pieceIsRed !== isRed) continue; // Different color, skip
+
+                const moves = this.getValidMoves(board, x, y);
+                if (moves.length > 0) {
+                    allMoves.push({from: {x, y}, moves});
+                }
+            }
+        }
+
+        return allMoves;
+    }
+
+    /**
+     * Check if it's checkmate
+     */
+    isCheckmate(board, isRed) {
+        // Must be in check AND have no legal moves
+        if (!this.isInCheck(board, isRed)) return false;
+
+        const legalMoves = this.getAllLegalMoves(board, isRed);
+        return legalMoves.length === 0;
+    }
+
+    /**
+     * Check if it's stalemate (not in check but no legal moves)
+     */
+    isStalemate(board, isRed) {
+        // Must NOT be in check AND have no legal moves
+        if (this.isInCheck(board, isRed)) return false;
+
+        const legalMoves = this.getAllLegalMoves(board, isRed);
+        return legalMoves.length === 0;
+    }
 }

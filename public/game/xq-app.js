@@ -46,12 +46,24 @@ export class XQApp {
         this.myBoardStyle = 'classic'; // Default board style
         this.myEnvironmentBg = 'forest'; // Default environment background
 
+        // Sound system - using simple tone generation for now (can replace with real sounds later)
+        this.sounds = {
+            pickup: this.createToneSound(800, 0.05, 0.1),    // High short beep for pickup
+            place: this.createToneSound(400, 0.05, 0.15),     // Lower beep for placement
+            capture: null,  // Will use TTS for "吃"
+            check: null,    // Will use TTS for "将军"
+            victory: null   // Will use TTS for victory announcement
+        };
+
         // Move selection state
         this.selectedPiece = null; // {x, y}
         this.validMoves = [];
 
         // Add sitting lock to prevent double-clicks
         this.isSitting = false;
+
+        // Track last move timestamp to avoid duplicate animations
+        this.lastMoveTimestamp = null;
 
         // Game timer properties (15 minutes per player)
         this.timerInterval = null;
@@ -616,6 +628,24 @@ export class XQApp {
                     `<div class="chat-msg"><strong>${m.user}:</strong> ${m.text}</div>`
                 ).join('');
                 log.scrollTop = log.scrollHeight;
+            }
+
+            // Check for move animations (lastMove changed)
+            if (g.lastMove && g.lastMove.ts !== this.lastMoveTimestamp) {
+                this.lastMoveTimestamp = g.lastMove.ts;
+
+                // Show animation for all clients
+                setTimeout(() => {
+                    if (g.lastMove.isCheckmate) {
+                        this.showMoveAnimation('checkmate', {winner: g.winner});
+                    } else if (g.lastMove.isStalemate) {
+                        this.showMoveAnimation('stalemate');
+                    } else if (g.lastMove.isCheck) {
+                        this.showMoveAnimation('check');
+                    } else if (g.lastMove.isCapture) {
+                        this.showMoveAnimation('capture');
+                    }
+                }, 200); // Small delay so the piece updates first
             }
 
             // Render pieces if game is active
@@ -1297,6 +1327,9 @@ export class XQApp {
     selectPiece(x, y) {
         this.selectedPiece = {x, y};
 
+        // Play pickup sound
+        this.playSound('pickup');
+
         // Get valid moves based on actual board coordinates
         this.validMoves = this.engine.getValidMoves(this.gameState.board, x, y);
 
@@ -1326,13 +1359,31 @@ export class XQApp {
         const fromX = this.selectedPiece.x;
         const fromY = this.selectedPiece.y;
 
+        // Check if this is a capture move
+        const capturedPiece = this.gameState.board[toY][toX];
+        const isCapture = capturedPiece !== null && capturedPiece !== '';
+
         // Update board
         const newBoard = this.gameState.board.map(row => [...row]);
         newBoard[toY][toX] = newBoard[fromY][fromX];
         newBoard[fromY][fromX] = null;
 
+        // Play placement sound
+        this.playSound('place');
+
+        // If capture, show animation and play sound
+        if (isCapture) {
+            this.showMoveAnimation('capture');
+        }
+
         // Switch turn
         const nextTurn = this.gameState.turn === 'red' ? 'black' : 'red';
+
+        // Check for check, checkmate, or stalemate on the OPPONENT (who is now on turn)
+        const opponentIsRed = nextTurn === 'red';
+        const isCheck = this.engine.isInCheck(newBoard, opponentIsRed);
+        const isCheckmate = isCheck && this.engine.isCheckmate(newBoard, opponentIsRed);
+        const isStalemate = !isCheck && this.engine.isStalemate(newBoard, opponentIsRed);
 
         // Flatten board for Firebase (convert null to empty string)
         const flatBoard = newBoard.map(row =>
@@ -1351,18 +1402,48 @@ export class XQApp {
             }, { merge: true });
         }
 
-        // Save to Firebase
+        // Save to Firebase with move metadata for animations
         const gameRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'games', this.tid);
-        await setDoc(gameRef, {
+        const moveData = {
+            from: {x: fromX, y: fromY},
+            to: {x: toX, y: toY},
+            isCapture: isCapture,
+            capturedPiece: capturedPiece,
+            isCheck: isCheck,
+            isCheckmate: isCheckmate,
+            isStalemate: isStalemate,
+            ts: Date.now()
+        };
+
+        // Determine new game status
+        let newStatus = 'playing';
+        let winner = null;
+
+        if (isCheckmate) {
+            newStatus = 'checkmate';
+            winner = this.gameState.turn; // Current player (who just moved) wins
+            this.showMoveAnimation('checkmate', {winner});
+        } else if (isStalemate) {
+            newStatus = 'stalemate';
+            this.showMoveAnimation('stalemate');
+        } else if (isCheck) {
+            this.showMoveAnimation('check');
+        }
+
+        const updateData = {
             board: flatBoard,
             turn: nextTurn,
-            history: arrayUnion({
-                from: {x: fromX, y: fromY},
-                to: {x: toX, y: toY},
-                ts: Date.now()
-            })
-        }, { merge: true });
-        
+            lastMove: moveData,
+            history: arrayUnion(moveData)
+        };
+
+        if (newStatus !== 'playing') {
+            updateData.status = newStatus;
+            if (winner) updateData.winner = winner;
+        }
+
+        await setDoc(gameRef, updateData, { merge: true });
+
         // Clear selection
         this.selectedPiece = null;
         this.validMoves = [];
@@ -1550,10 +1631,155 @@ export class XQApp {
         if (el) {
             el.placeholder = msg;
             el.style.borderColor = color === "red" ? "#cd3333" : "#f1c40f";
-            setTimeout(() => { 
-                el.placeholder = "Broadcast to room..."; 
-                el.style.borderColor = "#333"; 
+            setTimeout(() => {
+                el.placeholder = "Broadcast to room...";
+                el.style.borderColor = "#333";
             }, 4000);
         }
+    }
+
+    // ==================== SOUND SYSTEM ====================
+
+    /**
+     * Create a simple tone sound using Web Audio API
+     */
+    createToneSound(frequency, duration, volume = 0.1) {
+        return () => {
+            try {
+                const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                const oscillator = audioContext.createOscillator();
+                const gainNode = audioContext.createGain();
+
+                oscillator.connect(gainNode);
+                gainNode.connect(audioContext.destination);
+
+                oscillator.frequency.value = frequency;
+                oscillator.type = 'sine';
+                gainNode.gain.setValueAtTime(volume, audioContext.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + duration);
+
+                oscillator.start(audioContext.currentTime);
+                oscillator.stop(audioContext.currentTime + duration);
+            } catch (e) {
+                console.warn('Audio playback failed:', e);
+            }
+        };
+    }
+
+    /**
+     * Play a sound effect
+     */
+    playSound(soundName) {
+        if (this.sounds[soundName] && typeof this.sounds[soundName] === 'function') {
+            this.sounds[soundName]();
+        }
+    }
+
+    /**
+     * Generate Chinese TTS speech and play it
+     */
+    async playChineseTTS(text) {
+        // Using a simple approach - you already have TTS in victory_clip.html
+        // For now, let's use the browser's built-in speech synthesis as a fallback
+        try {
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.lang = 'zh-CN';
+            utterance.rate = 1.0;
+            utterance.pitch = 1.0;
+            utterance.volume = 0.8;
+            window.speechSynthesis.speak(utterance);
+        } catch (e) {
+            console.warn('TTS playback failed:', e);
+        }
+    }
+
+    /**
+     * Show move animation with sound
+     * @param {string} type - 'capture', 'check', 'checkmate', 'stalemate'
+     * @param {object} data - Additional data (winner, etc.)
+     */
+    async showMoveAnimation(type, data = {}) {
+        const animationEl = document.getElementById('move-animation');
+        const iconEl = document.getElementById('move-animation-icon');
+        const chineseEl = document.getElementById('move-animation-chinese');
+        const englishEl = document.getElementById('move-animation-english');
+
+        if (!animationEl || !iconEl || !chineseEl || !englishEl) return;
+
+        // Hide draw offer modal if showing
+        const drawOfferModal = document.getElementById('draw-offer-modal');
+        if (drawOfferModal) drawOfferModal.style.display = 'none';
+
+        // Configure animation based on type
+        let icon, chinese, english, sound, duration;
+
+        switch(type) {
+            case 'capture':
+                icon = '⚔️';
+                chinese = '吃';
+                english = 'CAPTURE';
+                sound = '吃';
+                duration = 1500;
+                break;
+            case 'check':
+                icon = '👑';
+                chinese = '将军';
+                english = 'CHECK';
+                sound = '将军';
+                duration = 2000;
+                break;
+            case 'checkmate':
+                const winner = data.winner === 'red' ? '红胜' : '黑胜';
+                const winnerEn = data.winner === 'red' ? 'RED WINS' : 'BLACK WINS';
+                icon = '🏆';
+                chinese = `绝杀！无解\n${winner}`;
+                english = `CHECKMATE!\n${winnerEn}`;
+                sound = `绝杀！无解 ${winner}`;
+                duration = 4000;
+                chineseEl.style.fontSize = '2rem'; // Smaller for multi-line
+                chineseEl.style.whiteSpace = 'pre-line';
+                englishEl.style.whiteSpace = 'pre-line';
+                break;
+            case 'stalemate':
+                icon = '🤝';
+                chinese = '和棋';
+                english = 'STALEMATE';
+                sound = '和棋';
+                duration = 3000;
+                break;
+            case 'perpetual-check':
+                icon = '⚠️';
+                chinese = '连续将军判负\nPerpetual Check - Loss';
+                english = `${data.loser === 'red' ? 'RED' : 'BLACK'} LOSES`;
+                sound = '连续将军判负';
+                duration = 3000;
+                chineseEl.style.fontSize = '1.5rem';
+                chineseEl.style.whiteSpace = 'pre-line';
+                break;
+            default:
+                return;
+        }
+
+        // Set content
+        iconEl.innerText = icon;
+        chineseEl.innerText = chinese;
+        englishEl.innerText = english;
+
+        // Show animation
+        animationEl.style.display = 'block';
+
+        // Play sound
+        if (sound) {
+            await this.playChineseTTS(sound);
+        }
+
+        // Hide after duration
+        setTimeout(() => {
+            animationEl.style.display = 'none';
+            // Reset font sizes
+            chineseEl.style.fontSize = '2.5rem';
+            chineseEl.style.whiteSpace = 'normal';
+            englishEl.style.whiteSpace = 'normal';
+        }, duration);
     }
 }
