@@ -631,6 +631,13 @@ export class XQApp {
             }
 
             // Check for move animations (lastMove changed)
+            console.log('🔍 Checking lastMove:', {
+                hasLastMove: !!g.lastMove,
+                lastMoveTs: g.lastMove?.ts,
+                currentTimestamp: this.lastMoveTimestamp,
+                willTrigger: g.lastMove && g.lastMove.ts !== this.lastMoveTimestamp
+            });
+
             if (g.lastMove && g.lastMove.ts !== this.lastMoveTimestamp) {
                 this.lastMoveTimestamp = g.lastMove.ts;
 
