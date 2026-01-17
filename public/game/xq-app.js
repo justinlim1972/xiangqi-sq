@@ -64,6 +64,7 @@ export class XQApp {
 
         // Track last move timestamp to avoid duplicate animations
         this.lastMoveTimestamp = null;
+        this.hasCompletedFirstSync = false; // Track if we've completed the initial page load sync
 
         // Game timer properties (15 minutes per player)
         this.timerInterval = null;
@@ -635,22 +636,40 @@ export class XQApp {
                 hasLastMove: !!g.lastMove,
                 lastMoveTs: g.lastMove?.ts,
                 currentTimestamp: this.lastMoveTimestamp,
+                hasCompletedFirstSync: this.hasCompletedFirstSync,
                 willTrigger: g.lastMove && g.lastMove.ts !== this.lastMoveTimestamp
             });
 
             if (g.lastMove && g.lastMove.ts !== this.lastMoveTimestamp) {
-                const isFirstSync = this.lastMoveTimestamp === null;
+                const isInitialPageLoad = !this.hasCompletedFirstSync;
+                const previousTimestamp = this.lastMoveTimestamp;
                 this.lastMoveTimestamp = g.lastMove.ts;
 
-                // Only show animation if this is NOT the first sync (i.e., a real new move)
-                if (!isFirstSync) {
-                    console.log('🎬 Move animation detected:', {
-                        isCapture: g.lastMove.isCapture,
-                        isCheck: g.lastMove.isCheck,
-                        isCheckmate: g.lastMove.isCheckmate,
-                        isStalemate: g.lastMove.isStalemate,
-                        timestamp: g.lastMove.ts
-                    });
+                // Calculate how long ago this move happened
+                const moveAge = Date.now() - g.lastMove.ts;
+                const isRecentMove = moveAge < 5000; // Move happened within last 5 seconds
+
+                console.log('🎬 Move detected:', {
+                    isCapture: g.lastMove.isCapture,
+                    isCheck: g.lastMove.isCheck,
+                    isCheckmate: g.lastMove.isCheckmate,
+                    isStalemate: g.lastMove.isStalemate,
+                    timestamp: g.lastMove.ts,
+                    moveAge: moveAge,
+                    isRecentMove: isRecentMove,
+                    isInitialPageLoad: isInitialPageLoad,
+                    previousTimestamp: previousTimestamp
+                });
+
+                // Show animation if:
+                // 1. This is NOT the initial page load (already synced before), OR
+                // 2. This IS the initial page load BUT the move is very recent (happened in last 5 seconds)
+                const shouldShowAnimation = !isInitialPageLoad || isRecentMove;
+
+                this.hasCompletedFirstSync = true; // Mark that we've completed first sync
+
+                if (shouldShowAnimation) {
+                    console.log('✅ Showing animation - recent move or already synced');
 
                     // Show animation for all clients (including the one who made the move)
                     setTimeout(() => {
@@ -669,7 +688,7 @@ export class XQApp {
                         }
                     }, 200); // Small delay so the piece updates first
                 } else {
-                    console.log('⏭️ Skipping animation - this is initial page load');
+                    console.log('⏭️ Skipping animation - stale move from completed game (age: ' + Math.round(moveAge/1000) + 's)');
                 }
             }
 
