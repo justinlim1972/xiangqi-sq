@@ -634,15 +634,27 @@ export class XQApp {
             if (g.lastMove && g.lastMove.ts !== this.lastMoveTimestamp) {
                 this.lastMoveTimestamp = g.lastMove.ts;
 
-                // Show animation for all clients
+                console.log('🎬 Move animation detected:', {
+                    isCapture: g.lastMove.isCapture,
+                    isCheck: g.lastMove.isCheck,
+                    isCheckmate: g.lastMove.isCheckmate,
+                    isStalemate: g.lastMove.isStalemate,
+                    timestamp: g.lastMove.ts
+                });
+
+                // Show animation for all clients (including the one who made the move)
                 setTimeout(() => {
                     if (g.lastMove.isCheckmate) {
+                        console.log('🏆 Showing checkmate animation for winner:', g.winner);
                         this.showMoveAnimation('checkmate', {winner: g.winner});
                     } else if (g.lastMove.isStalemate) {
+                        console.log('🤝 Showing stalemate animation');
                         this.showMoveAnimation('stalemate');
                     } else if (g.lastMove.isCheck) {
+                        console.log('👑 Showing check animation');
                         this.showMoveAnimation('check');
                     } else if (g.lastMove.isCapture) {
+                        console.log('⚔️ Showing capture animation');
                         this.showMoveAnimation('capture');
                     }
                 }, 200); // Small delay so the piece updates first
@@ -1368,13 +1380,11 @@ export class XQApp {
         newBoard[toY][toX] = newBoard[fromY][fromX];
         newBoard[fromY][fromX] = null;
 
-        // Play placement sound
+        // Play placement sound (local only, immediate feedback)
         this.playSound('place');
 
-        // If capture, show animation and play sound
-        if (isCapture) {
-            this.showMoveAnimation('capture');
-        }
+        // NOTE: Don't show animations here - let Firebase sync trigger them for ALL clients
+        // This ensures everyone sees the same animation at the same time
 
         // Switch turn
         const nextTurn = this.gameState.turn === 'red' ? 'black' : 'red';
@@ -1422,13 +1432,12 @@ export class XQApp {
         if (isCheckmate) {
             newStatus = 'checkmate';
             winner = this.gameState.turn; // Current player (who just moved) wins
-            this.showMoveAnimation('checkmate', {winner});
+            // NOTE: Don't show animation here - Firebase sync will trigger it for ALL clients
         } else if (isStalemate) {
             newStatus = 'stalemate';
-            this.showMoveAnimation('stalemate');
-        } else if (isCheck) {
-            this.showMoveAnimation('check');
+            // NOTE: Don't show animation here - Firebase sync will trigger it for ALL clients
         }
+        // NOTE: Check animation will also be triggered by Firebase sync
 
         const updateData = {
             board: flatBoard,
@@ -1699,12 +1708,17 @@ export class XQApp {
      * @param {object} data - Additional data (winner, etc.)
      */
     async showMoveAnimation(type, data = {}) {
+        console.log('🎭 showMoveAnimation called:', type, data);
+
         const animationEl = document.getElementById('move-animation');
         const iconEl = document.getElementById('move-animation-icon');
         const chineseEl = document.getElementById('move-animation-chinese');
         const englishEl = document.getElementById('move-animation-english');
 
-        if (!animationEl || !iconEl || !chineseEl || !englishEl) return;
+        if (!animationEl || !iconEl || !chineseEl || !englishEl) {
+            console.error('❌ Animation elements not found!');
+            return;
+        }
 
         // Hide draw offer modal if showing
         const drawOfferModal = document.getElementById('draw-offer-modal');
