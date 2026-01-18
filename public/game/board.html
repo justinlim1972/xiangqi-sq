@@ -307,6 +307,84 @@
         .p-card.time-stress {
             animation: stress-pulse 1s infinite;
         }
+
+        /* BATTLE START SPLASH SCREEN */
+        #battle-splash {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(0, 0, 0, 0.95);
+            z-index: 9999;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            animation: fadeIn 0.5s ease-in;
+        }
+
+        #battle-splash.active {
+            display: flex;
+        }
+
+        .battle-splash-content {
+            position: relative;
+            width: 90vmin;
+            max-width: 800px;
+            animation: zoomIn 0.8s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+
+        .battle-splash-image {
+            width: 100%;
+            height: auto;
+            border-radius: 20px;
+            box-shadow: 0 0 80px rgba(255, 68, 68, 0.8),
+                        0 0 120px rgba(241, 196, 15, 0.6),
+                        0 20px 60px rgba(0, 0, 0, 0.9);
+            filter: brightness(1.1) contrast(1.15);
+        }
+
+        .battle-splash-glow {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 120%;
+            height: 120%;
+            background: radial-gradient(circle, rgba(255, 68, 68, 0.4) 0%, transparent 70%);
+            animation: pulse-glow 2s ease-in-out infinite;
+            pointer-events: none;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        @keyframes zoomIn {
+            0% {
+                transform: scale(0.3);
+                opacity: 0;
+            }
+            50% {
+                transform: scale(1.05);
+            }
+            100% {
+                transform: scale(1);
+                opacity: 1;
+            }
+        }
+
+        @keyframes pulse-glow {
+            0%, 100% {
+                opacity: 0.6;
+                transform: translate(-50%, -50%) scale(1);
+            }
+            50% {
+                opacity: 1;
+                transform: translate(-50%, -50%) scale(1.1);
+            }
+        }
     </style>
 </head>
 <body>
@@ -314,6 +392,14 @@
 <div id="loader">
     <div class="spin"></div>
     <p style="margin-top:20px; color:var(--gold); font-weight:bold; letter-spacing: 2px;">SYNCING ARENA...</p>
+</div>
+
+<!-- BATTLE START SPLASH SCREEN -->
+<div id="battle-splash">
+    <div class="battle-splash-content">
+        <div class="battle-splash-glow"></div>
+        <img src="/pictures/Start_Game.png" alt="Battle Start" class="battle-splash-image">
+    </div>
 </div>
 
 <!-- TEST: UNSEAT button moved to top to test z-index blocking 
@@ -632,7 +718,7 @@
 </div>
 
 <script type="module">
-    import { XQApp } from "./xq-app.js?v=52";
+    import { XQApp } from "./xq-app.js?v=57";
     // Initialize the Orchestrator which manages all modules (Engine, UI, Firebase)
     window.app = new XQApp();
     window.app.init();

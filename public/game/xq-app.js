@@ -40,6 +40,7 @@ export class XQApp {
         this.profile = null;
         this.table = null;
         this.gameState = null;
+        this.previousGameStatus = null; // Track previous game status to detect battle start
         this.occupants = []; // Initialize as empty array
         this.lastButtonState = null; // Track button state to prevent unnecessary recreation
         this.myPieceStyle = 'ivory'; // Default piece style
@@ -104,6 +105,13 @@ export class XQApp {
 
         this.hasJoined = false;
         window.addEventListener('beforeunload', () => this.leaveRoom());
+
+        // Load speech synthesis voices
+        if ('speechSynthesis' in window) {
+            window.speechSynthesis.onvoiceschanged = () => {
+                console.log('🎤 Speech voices loaded:', window.speechSynthesis.getVoices().length);
+            };
+        }
     }
 
     async init() {
@@ -370,29 +378,54 @@ export class XQApp {
                 return;
             }
 
-            // Decrement the current player's timer
+            // CRITICAL FIX: Only the player whose turn it is should decrement the timer
+            // This prevents both players from running timers simultaneously
+            if (!this.table || !this.user) {
+                console.warn('⚠️ Table or user not loaded yet, skipping timer tick');
+                return;
+            }
+
+            const iAmRed = this.table.playerRed?.uid === this.user.uid;
+            const iAmBlack = this.table.playerBlack?.uid === this.user.uid;
+            const isMyTurn = (this.gameState.turn === 'red' && iAmRed) || (this.gameState.turn === 'black' && iAmBlack);
+
+            console.log(`⏱️ Timer tick - Turn: ${this.gameState.turn}, I am Red: ${iAmRed}, I am Black: ${iAmBlack}, My turn: ${isMyTurn}`);
+
+            // Only decrement and sync if it's my turn
+            if (!isMyTurn) {
+                // Not my turn or I'm an observer, just update display from Firestore values
+                this.updateTimerDisplay();
+                return;
+            }
+
+            // It's my turn - decrement my timer
             if (this.gameState.turn === 'red') {
                 this.redTimeLeft--;
+                console.log(`⏱️ RED timer decremented to ${this.redTimeLeft}s by ${this.user.uid}`);
                 if (this.redTimeLeft <= 0) {
                     this.redTimeLeft = 0;
                     this.handleTimeout('red');
+                    return;
                 }
             } else {
                 this.blackTimeLeft--;
+                console.log(`⏱️ BLACK timer decremented to ${this.blackTimeLeft}s by ${this.user.uid}`);
                 if (this.blackTimeLeft <= 0) {
                     this.blackTimeLeft = 0;
                     this.handleTimeout('black');
+                    return;
                 }
             }
 
             this.updateTimerDisplay();
 
-            // Sync to Firestore every second so all clients see the timer
+            // Sync to Firestore so all clients see the updated timer
             try {
                 await setDoc(gameRef, {
                     redTimeLeft: this.redTimeLeft,
                     blackTimeLeft: this.blackTimeLeft
                 }, { merge: true });
+                console.log(`⏱️ Synced timer to Firestore: Red=${this.redTimeLeft}s, Black=${this.blackTimeLeft}s`);
             } catch (error) {
                 console.error('❌ Failed to sync timer to Firestore:', error);
             }
@@ -745,9 +778,32 @@ export class XQApp {
                 timestamp: Date.now()
             });
 
+            // Detect battle start: Show splash screen for EVERYONE when game status changes to 'playing'
+            // IMPORTANT: Only show if previous status was explicitly NOT 'playing' (avoid showing on page load)
+            if (g.status === 'playing' && this.previousGameStatus !== null && this.previousGameStatus !== 'playing') {
+                console.log('⚔️ Battle just started! Showing splash for everyone...');
+                this.showBattleSplash();
+            }
+
+            // Update previous status for next comparison (set to null on first load if no previous status)
+            if (this.previousGameStatus === null) {
+                this.previousGameStatus = g.status; // Initialize without triggering splash
+            } else {
+                this.previousGameStatus = g.status;
+            }
+
             // Sync timer values from Firestore to show stress animation on all clients
-            if (g.redTimeLeft !== undefined) this.redTimeLeft = g.redTimeLeft;
-            if (g.blackTimeLeft !== undefined) this.blackTimeLeft = g.blackTimeLeft;
+            // CRITICAL: Only update timer from Firestore if it's NOT my turn to prevent double decrements
+            const iAmRed = this.table?.playerRed?.uid === this.user?.uid;
+            const iAmBlack = this.table?.playerBlack?.uid === this.user?.uid;
+            const isMyTurn = (g.turn === 'red' && iAmRed) || (g.turn === 'black' && iAmBlack);
+
+            if (!isMyTurn) {
+                // Not my turn - sync from Firestore
+                if (g.redTimeLeft !== undefined) this.redTimeLeft = g.redTimeLeft;
+                if (g.blackTimeLeft !== undefined) this.blackTimeLeft = g.blackTimeLeft;
+            }
+            // If it's my turn, don't overwrite my local timer - I'm the one controlling it
 
             // Update timer display and stress animation
             if (g.status === 'playing') {
@@ -1557,8 +1613,51 @@ export class XQApp {
         await this.engageBattle();
     }
 
+    showBattleSplash() {
+        console.log('🎬 Showing battle splash screen...');
+
+        const splash = document.getElementById('battle-splash');
+        if (!splash) return;
+
+        // Show splash screen
+        splash.classList.add('active');
+
+        // Play Chinese voice using Web Speech API with intense tone
+        if ('speechSynthesis' in window) {
+            // Cancel any ongoing speech
+            window.speechSynthesis.cancel();
+
+            const utterance = new SpeechSynthesisUtterance('即分高下，也决生死！');
+            utterance.lang = 'zh-CN'; // Chinese (Simplified)
+            utterance.rate = 0.9; // Slightly slower for dramatic effect
+            utterance.pitch = 0.8; // Lower pitch for intensity
+            utterance.volume = 1.0; // Maximum volume
+
+            // Try to find a male Chinese voice
+            const voices = window.speechSynthesis.getVoices();
+            const chineseVoice = voices.find(voice =>
+                voice.lang.startsWith('zh') && voice.name.toLowerCase().includes('male')
+            ) || voices.find(voice => voice.lang.startsWith('zh'));
+
+            if (chineseVoice) {
+                utterance.voice = chineseVoice;
+                console.log('🎤 Using voice:', chineseVoice.name);
+            }
+
+            window.speechSynthesis.speak(utterance);
+        }
+
+        // Hide splash after 7 seconds
+        setTimeout(() => {
+            splash.classList.remove('active');
+            console.log('🎬 Battle splash hidden');
+        }, 7000);
+    }
+
     async engageBattle() {
         console.log('⚔️ Engaging battle...');
+
+        // Note: Battle splash will be shown automatically by syncGame() listener for ALL players
 
         // First, check if game is already starting/started
         const gameRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'games', this.tid);
