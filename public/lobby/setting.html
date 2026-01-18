@@ -184,6 +184,10 @@
                 <div class="option-card" data-val="jade" onclick="selectItem('piece', 'jade', this)"><div class="thumb-preview" id="thumb-p-jade"></div><span>Polished Jade</span></div>
                 <div class="option-card" data-val="flat" onclick="selectItem('piece', 'flat', this)"><div class="thumb-preview" id="thumb-p-flat"></div><span>Modern Flat</span></div>
                 <div class="option-card" data-val="wood" onclick="selectItem('piece', 'wood', this)"><div class="thumb-preview" id="thumb-p-wood"></div><span>Carved Rosewood</span></div>
+                <div class="option-card" data-val="bronze" onclick="selectItem('piece', 'bronze', this)"><div class="thumb-preview" id="thumb-p-bronze"></div><span>Ancient Bronze</span></div>
+                <div class="option-card" data-val="crystal" onclick="selectItem('piece', 'crystal', this)"><div class="thumb-preview" id="thumb-p-crystal"></div><span>Ice Crystal</span></div>
+                <div class="option-card" data-val="neon" onclick="selectItem('piece', 'neon', this)"><div class="thumb-preview" id="thumb-p-neon"></div><span>Neon Glow</span></div>
+                <div class="option-card" data-val="gold" onclick="selectItem('piece', 'gold', this)"><div class="thumb-preview" id="thumb-p-gold"></div><span>Royal Gold</span></div>
             </div>
         </div>
 
@@ -194,6 +198,10 @@
                 <div class="option-card" data-val="emerald" onclick="selectItem('board', 'emerald', this)"><div class="thumb-preview" id="thumb-b-emerald"></div><span>Emerald Marble</span></div>
                 <div class="option-card" data-val="slate" onclick="selectItem('board', 'slate', this)"><div class="thumb-preview" id="thumb-b-slate"></div><span>Minimalist Slate</span></div>
                 <div class="option-card" data-val="mahogany" onclick="selectItem('board', 'mahogany', this)"><div class="thumb-preview" id="thumb-b-mahogany"></div><span>Dark Mahogany</span></div>
+                <div class="option-card" data-val="bamboo" onclick="selectItem('board', 'bamboo', this)"><div class="thumb-preview" id="thumb-b-bamboo"></div><span>Bamboo Garden</span></div>
+                <div class="option-card" data-val="stone" onclick="selectItem('board', 'stone', this)"><div class="thumb-preview" id="thumb-b-stone"></div><span>Ancient Stone</span></div>
+                <div class="option-card" data-val="cyber" onclick="selectItem('board', 'cyber', this)"><div class="thumb-preview" id="thumb-b-cyber"></div><span>Cyber Grid</span></div>
+                <div class="option-card" data-val="cherry" onclick="selectItem('board', 'cherry', this)"><div class="thumb-preview" id="thumb-b-cherry"></div><span>Cherry Blossom</span></div>
             </div>
         </div>
 
@@ -300,7 +308,11 @@
         ivory: (char, isRed) => `<svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="46" fill="#fdfaf0" stroke="#d4c9b0" stroke-width="2"/><text x="50" y="72" text-anchor="middle" font-size="60" font-family="serif" fill="${isRed ? '#cd3333' : '#222'}" font-weight="bold">${char}</text></svg>`,
         jade: (char, isRed) => `<svg viewBox="0 0 100 100"><defs><radialGradient id="g-${char}-${isRed}" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="${isRed ? '#ff6666' : '#2d5a27'}" /><stop offset="100%" stop-color="${isRed ? '#800000' : '#0a1a08'}" /></radialGradient></defs><circle cx="50" cy="50" r="46" fill="url(#g-${char}-${isRed})" stroke="#fff" stroke-width="3" opacity="0.9"/><text x="50" y="70" text-anchor="middle" font-size="55" font-family="sans-serif" fill="#fff" font-weight="900">${char}</text></svg>`,
         flat: (char, isRed) => `<svg viewBox="0 0 100 100"><rect x="5" y="5" width="90" height="90" rx="18" fill="${isRed ? '#ef4444' : '#1e293b'}"/><text x="50" y="75" text-anchor="middle" font-size="65" font-family="Arial" fill="#fff" font-weight="bold">${char}</text></svg>`,
-        wood: (char, isRed) => `<svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="48" fill="${isRed ? '#5a3a2a' : '#1e1e1e'}" stroke="${isRed ? '#2a1a10' : '#000'}" stroke-width="3"/><text x="50" y="72" text-anchor="middle" font-size="55" font-family="serif" fill="${isRed ? '#facc15' : '#cbd5e1'}" font-weight="bold">${char}</text></svg>`
+        wood: (char, isRed) => `<svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="48" fill="${isRed ? '#5a3a2a' : '#1e1e1e'}" stroke="${isRed ? '#2a1a10' : '#000'}" stroke-width="3"/><text x="50" y="72" text-anchor="middle" font-size="55" font-family="serif" fill="${isRed ? '#facc15' : '#cbd5e1'}" font-weight="bold">${char}</text></svg>`,
+        bronze: (char, isRed) => `<svg viewBox="0 0 100 100"><defs><radialGradient id="bronze-${char}-${isRed}"><stop offset="0%" stop-color="${isRed ? '#cd7f32' : '#4a4a4a'}"/><stop offset="100%" stop-color="${isRed ? '#8b4513' : '#1a1a1a'}"/></radialGradient></defs><circle cx="50" cy="50" r="46" fill="url(#bronze-${char}-${isRed})" stroke="${isRed ? '#5a3a1a' : '#000'}" stroke-width="3"/><text x="50" y="72" text-anchor="middle" font-size="55" font-family="serif" fill="#d4af37" font-weight="bold" style="text-shadow: 2px 2px 4px rgba(0,0,0,0.8)">${char}</text></svg>`,
+        crystal: (char, isRed) => `<svg viewBox="0 0 100 100"><defs><linearGradient id="crystal-${char}-${isRed}" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="${isRed ? '#fef3c7' : '#bae6fd'}"/><stop offset="50%" stop-color="${isRed ? '#f59e0b' : '#0ea5e9'}"/><stop offset="100%" stop-color="${isRed ? '#b91c1c' : '#0369a1'}"/></linearGradient></defs><polygon points="50,5 90,35 90,65 50,95 10,65 10,35" fill="url(#crystal-${char}-${isRed})" stroke="${isRed ? '#dc2626' : '#0891b2'}" stroke-width="2" opacity="0.9"/><text x="50" y="70" text-anchor="middle" font-size="50" font-family="sans-serif" fill="#fff" font-weight="900" style="text-shadow: 0 0 10px rgba(255,255,255,0.8)">${char}</text></svg>`,
+        neon: (char, isRed) => `<svg viewBox="0 0 100 100"><defs><filter id="glow-${char}-${isRed}"><feGaussianBlur stdDeviation="4" result="coloredBlur"/><feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs><rect x="8" y="8" width="84" height="84" rx="12" fill="#0a0a0a" stroke="${isRed ? '#ff0080' : '#00ffff'}" stroke-width="3" filter="url(#glow-${char}-${isRed})"/><text x="50" y="72" text-anchor="middle" font-size="60" font-family="'Courier New', monospace" fill="${isRed ? '#ff0080' : '#00ffff'}" font-weight="900" filter="url(#glow-${char}-${isRed})">${char}</text></svg>`,
+        gold: (char, isRed) => `<svg viewBox="0 0 100 100"><defs><radialGradient id="gold-${char}-${isRed}"><stop offset="0%" stop-color="${isRed ? '#ffd700' : '#2c2c2c'}"/><stop offset="50%" stop-color="${isRed ? '#ffed4e' : '#1a1a1a'}"/><stop offset="100%" stop-color="${isRed ? '#b8860b' : '#000'}"/></radialGradient></defs><circle cx="50" cy="50" r="46" fill="url(#gold-${char}-${isRed})" stroke="${isRed ? '#8b6914' : '#d4af37'}" stroke-width="3"/><text x="50" y="72" text-anchor="middle" font-size="58" font-family="'Times New Roman', serif" fill="${isRed ? '#8b0000' : '#ffd700'}" font-weight="bold" style="text-shadow: 1px 1px 2px rgba(0,0,0,0.5)">${char}</text></svg>`
     };
 
     function genBoard(bg, s) {
@@ -316,7 +328,11 @@
         classic: () => genBoard("#dcb35c", "#5d2e0c"),
         emerald: () => genBoard("#0a3d2e", "#a8e6cf"),
         slate: () => genBoard("#f0f2f5", "#2c3e50"),
-        mahogany: () => genBoard("#2a1817", "#facc15")
+        mahogany: () => genBoard("#2a1817", "#facc15"),
+        bamboo: () => genBoard("#8ba888", "#2d5016"),
+        stone: () => genBoard("#6b7280", "#1f2937"),
+        cyber: () => genBoard("#0a0a0a", "#00ffff"),
+        cherry: () => genBoard("#ffc9d9", "#881337")
     };
 
     const environmentTemplates = {
@@ -473,11 +489,11 @@
 
     document.addEventListener('DOMContentLoaded', () => {
         buildGallery();
-        ['ivory', 'jade', 'flat', 'wood'].forEach(s => {
+        ['ivory', 'jade', 'flat', 'wood', 'bronze', 'crystal', 'neon', 'gold'].forEach(s => {
             const el = document.getElementById(`thumb-p-${s}`);
             if(el) el.innerHTML = `<div style="width:60%;">${pieceTemplates[s]('帥', true)}</div>`;
         });
-        ['classic', 'emerald', 'slate', 'mahogany'].forEach(s => {
+        ['classic', 'emerald', 'slate', 'mahogany', 'bamboo', 'stone', 'cyber', 'cherry'].forEach(s => {
             const el = document.getElementById(`thumb-b-${s}`);
             if(el) el.innerHTML = boardTemplates[s]();
         });

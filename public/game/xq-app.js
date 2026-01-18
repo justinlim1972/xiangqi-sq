@@ -84,11 +84,23 @@ export class XQApp {
         this.ambientMusic = null;
         this.musicTracks = [
             '/music/beyond-by-onycs.mp3',
+            '/music/cyber-shogun.mp3',
+            '/music/digital-samurai-showdown.mp3',
             '/music/dreamcatcher-by-onycs.mp3',
-            '/music/paradise-by-onycs.mp3'
+            '/music/neon-arpeggio.mp3',
+            '/music/paradise-by-onycs.mp3',
+            '/music/solitudes-embrace.mp3',
+            '/music/woven-threads.mp3'
         ];
+
         // Start from random track each time
         this.currentTrackIndex = Math.floor(Math.random() * this.musicTracks.length);
+
+        // Battle request countdown timer
+        this.battleRequestCountdownTimer = null;
+
+        // Battle rejection notification timer
+        this.battleRejectionCountdownTimer = null;
 
         this.hasJoined = false;
         window.addEventListener('beforeunload', () => this.leaveRoom());
@@ -115,13 +127,17 @@ export class XQApp {
                 // Load player's preferred piece style
                 if (this.profile && this.profile.pieceSet) {
                     this.myPieceStyle = this.profile.pieceSet;
-                    console.log('🎨 Loaded piece style:', this.myPieceStyle);
+                    console.log('🎨 Loaded piece style from profile:', this.myPieceStyle);
+                } else {
+                    console.log('⚠️ No piece style in profile, using default:', this.myPieceStyle);
                 }
 
                 // Load player's preferred board style
                 if (this.profile && this.profile.boardSet) {
                     this.myBoardStyle = this.profile.boardSet;
-                    console.log('🎨 Loaded board style:', this.myBoardStyle);
+                    console.log('🎨 Loaded board style from profile:', this.myBoardStyle);
+                } else {
+                    console.log('⚠️ No board style in profile, using default:', this.myBoardStyle);
                 }
 
                 // Load player's preferred environment background
@@ -220,7 +236,11 @@ export class XQApp {
             classic: { bg: '#dcb35c', lineColor: '#5d2e0c', borderColor: '#2a1a10' },
             emerald: { bg: '#0a3d2e', lineColor: '#a8e6cf', borderColor: '#1a4d3a' },
             slate: { bg: '#f0f2f5', lineColor: '#2c3e50', borderColor: '#34495e' },
-            mahogany: { bg: '#2a1817', lineColor: '#facc15', borderColor: '#1a0f0e' }
+            mahogany: { bg: '#2a1817', lineColor: '#facc15', borderColor: '#1a0f0e' },
+            bamboo: { bg: '#8ba888', lineColor: '#2d5016', borderColor: '#1a3010' },
+            stone: { bg: '#6b7280', lineColor: '#1f2937', borderColor: '#111827' },
+            cyber: { bg: '#0a0a0a', lineColor: '#00ffff', borderColor: '#00ffff' },
+            cherry: { bg: '#ffc9d9', lineColor: '#881337', borderColor: '#4c0519' }
         };
 
         const style = boardStyles[this.myBoardStyle] || boardStyles.classic;
@@ -273,12 +293,30 @@ export class XQApp {
     updateTimerDisplay() {
         const redTimerEl = document.getElementById('red-timer');
         const blackTimerEl = document.getElementById('black-timer');
+        const redCard = document.getElementById('player-card-red');
+        const blackCard = document.getElementById('player-card-black');
 
         if (redTimerEl) redTimerEl.innerText = this.formatTime(this.redTimeLeft);
         if (blackTimerEl) blackTimerEl.innerText = this.formatTime(this.blackTimeLeft);
+
+        // Add stress animation when time is running low (under 1 minute = 60 seconds)
+        if (redCard) {
+            if (this.redTimeLeft <= 60 && this.redTimeLeft > 0) {
+                redCard.classList.add('time-stress');
+            } else {
+                redCard.classList.remove('time-stress');
+            }
+        }
+        if (blackCard) {
+            if (this.blackTimeLeft <= 60 && this.blackTimeLeft > 0) {
+                blackCard.classList.add('time-stress');
+            } else {
+                blackCard.classList.remove('time-stress');
+            }
+        }
     }
 
-    startTimer() {
+    async startTimer() {
         // Stop any existing timer
         if (this.timerInterval) {
             clearInterval(this.timerInterval);
@@ -290,13 +328,43 @@ export class XQApp {
         if (redTimerEl) redTimerEl.style.display = 'block';
         if (blackTimerEl) blackTimerEl.style.display = 'block';
 
-        // Reset timers to 15 minutes
-        this.redTimeLeft = 15 * 60;
-        this.blackTimeLeft = 15 * 60;
+        // Get time control from region
+        let baseTime = 15; // Default 15 minutes
+        let increment = 0; // Default 0 seconds increment
+
+        try {
+            const regionRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'regions', this.rid);
+            const regionSnap = await getDoc(regionRef);
+            if (regionSnap.exists()) {
+                const regionData = regionSnap.data();
+                baseTime = regionData.baseTime || 15;
+                increment = regionData.increment || 0;
+                console.log(`⏱️ Using time control from region: ${baseTime}m + ${increment}s increment`);
+            } else {
+                console.warn('⚠️ Region not found, using default time control: 15m + 0s');
+            }
+        } catch (error) {
+            console.error('❌ Failed to fetch region time control:', error);
+        }
+
+        // Store increment for later use
+        this.timeIncrement = increment;
+
+        // Reset timers using region's time control
+        this.redTimeLeft = baseTime * 60;
+        this.blackTimeLeft = baseTime * 60;
         this.updateTimerDisplay();
 
+        // Initialize timer in Firestore
+        const gameRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'games', this.tid);
+        await setDoc(gameRef, {
+            redTimeLeft: this.redTimeLeft,
+            blackTimeLeft: this.blackTimeLeft,
+            timeIncrement: this.timeIncrement
+        }, { merge: true });
+
         // Start countdown
-        this.timerInterval = setInterval(() => {
+        this.timerInterval = setInterval(async () => {
             if (!this.gameState || this.gameState.status !== 'playing') {
                 this.stopTimer();
                 return;
@@ -318,6 +386,16 @@ export class XQApp {
             }
 
             this.updateTimerDisplay();
+
+            // Sync to Firestore every second so all clients see the timer
+            try {
+                await setDoc(gameRef, {
+                    redTimeLeft: this.redTimeLeft,
+                    blackTimeLeft: this.blackTimeLeft
+                }, { merge: true });
+            } catch (error) {
+                console.error('❌ Failed to sync timer to Firestore:', error);
+            }
         }, 1000);
     }
 
@@ -332,11 +410,20 @@ export class XQApp {
         const blackTimerEl = document.getElementById('black-timer');
         if (redTimerEl) redTimerEl.style.display = 'none';
         if (blackTimerEl) blackTimerEl.style.display = 'none';
+
+        // Remove stress animation when game ends
+        const redCard = document.getElementById('player-card-red');
+        const blackCard = document.getElementById('player-card-black');
+        if (redCard) redCard.classList.remove('time-stress');
+        if (blackCard) blackCard.classList.remove('time-stress');
     }
 
     async handleTimeout(color) {
         this.stopTimer();
         const winner = color === 'red' ? 'black' : 'red';
+
+        // Show timeout animation and sound
+        this.showMoveAnimation('timeout', { winner: winner, loser: color });
 
         // Clear matchActive flag in table
         const tRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'regions', this.rid, 'tables', this.tid);
@@ -391,6 +478,18 @@ export class XQApp {
             if (redImg) redImg.src = this.table.playerRed?.avatar || '/lobby/1.JPG';
             if (blackImg) blackImg.src = this.table.playerBlack?.avatar || '/lobby/1.JPG';
 
+            // Update table owner badges
+            const ownerBadgeRed = document.getElementById('owner-badge-red');
+            const ownerBadgeBlack = document.getElementById('owner-badge-black');
+            const tableOwner = this.table.tableOwner;
+
+            if (ownerBadgeRed) {
+                ownerBadgeRed.style.display = (tableOwner && this.table.playerRed?.uid === tableOwner.uid) ? 'inline' : 'none';
+            }
+            if (ownerBadgeBlack) {
+                ownerBadgeBlack.style.display = (tableOwner && this.table.playerBlack?.uid === tableOwner.uid) ? 'inline' : 'none';
+            }
+
             // Update player card borders to show RED/BLACK clearly
             const redCard = document.getElementById('player-card-red');
             const blackCard = document.getElementById('player-card-black');
@@ -410,6 +509,12 @@ export class XQApp {
 
             // Check for draw offer and show modal
             this.checkDrawOfferModal();
+
+            // Check for battle request and show modal
+            this.checkBattleRequestModal();
+
+            // Check for battle rejection notification
+            this.checkBattleRejectionNotification();
 
             // Show/hide seating controls BASED ON CURRENT TABLE STATE
             const seatingArea = document.getElementById('seating-area');
@@ -640,6 +745,15 @@ export class XQApp {
                 timestamp: Date.now()
             });
 
+            // Sync timer values from Firestore to show stress animation on all clients
+            if (g.redTimeLeft !== undefined) this.redTimeLeft = g.redTimeLeft;
+            if (g.blackTimeLeft !== undefined) this.blackTimeLeft = g.blackTimeLeft;
+
+            // Update timer display and stress animation
+            if (g.status === 'playing') {
+                this.updateTimerDisplay();
+            }
+
             // Update button visibility when game state changes
             console.log('📞 Calling updateInGameControls from syncGame()');
             this.updateInGameControls();
@@ -847,6 +961,7 @@ export class XQApp {
 
         const isOccupied = side === 'red' ? !!this.table.playerRed : !!this.table.playerBlack;
         const isMySlot = side === 'red' ? iAmRed : iAmBlack;
+        const iAmOwner = this.table?.tableOwner?.uid === this.user?.uid;
 
         // Remove all click handlers first
         card.onclick = null;
@@ -860,6 +975,10 @@ export class XQApp {
             clickable = true;
         } else if (isMySlot) {
             // Seated player clicking their own slot - show actions
+            clickable = true;
+        } else if (iAmOwner && isOccupied && !isMySlot) {
+            // Table owner clicking opponent's slot - can boot
+            console.log(`✅ ${side.toUpperCase()} card is clickable for BOOT (owner: ${iAmOwner}, occupied: ${isOccupied}, notMySlot: ${!isMySlot})`);
             clickable = true;
         }
 
@@ -883,6 +1002,7 @@ export class XQApp {
         const iAmRed = this.table?.playerRed?.uid === this.user?.uid;
         const iAmBlack = this.table?.playerBlack?.uid === this.user?.uid;
         const iAmSeated = iAmRed || iAmBlack;
+        const iAmOwner = this.table?.tableOwner?.uid === this.user?.uid;
         const bothSeated = this.table?.playerRed && this.table?.playerBlack;
         const battleRequested = this.table?.battleRequest;
         const gameActive = this.gameState?.status === 'playing';
@@ -890,6 +1010,26 @@ export class XQApp {
         // Observer clicking empty slot
         if (!iAmSeated && !isOccupied) {
             actions.push({ label: '🪑 SIT HERE', action: () => this.sit(side), color: '#3498db' });
+            return actions;
+        }
+
+        // Table owner clicking opponent's slot (not during active game)
+        console.log('🔍 Boot check:', {
+            iAmOwner,
+            isMySlot,
+            isOccupied,
+            gameActive,
+            shouldShowBoot: iAmOwner && !isMySlot && isOccupied && !gameActive
+        });
+
+        if (iAmOwner && !isMySlot && isOccupied && !gameActive) {
+            const opponentName = side === 'red' ? this.table.playerRed?.name : this.table.playerBlack?.name;
+            console.log('✅ Showing BOOT option for:', opponentName);
+            actions.push({
+                label: `🥾 BOOT ${opponentName?.toUpperCase()}`,
+                action: () => this.bootPlayer(side),
+                color: '#cd3333'
+            });
             return actions;
         }
 
@@ -987,32 +1127,99 @@ export class XQApp {
 
     async unseat() {
         if (!this.user) return;
-        
+
         console.log('🚪 Unseating...');
-        
+
         const tRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'regions', this.rid, 'tables', this.tid);
         const freshSnap = await getDoc(tRef);
         const t = freshSnap.data();
-        
+
         const isRed = t?.playerRed?.uid === this.user.uid;
         const isBlack = t?.playerBlack?.uid === this.user.uid;
-        
+
         if (!isRed && !isBlack) {
             this.showStatus("You're not seated!", "red");
             return;
         }
-        
+
         try {
             const updates = {};
             if (isRed) updates.playerRed = deleteField();
             if (isBlack) updates.playerBlack = deleteField();
-            
+
+            // Check if opponent is still seated
+            const opponentStillSeated = isRed ? t?.playerBlack : t?.playerRed;
+            const iAmOwner = t?.tableOwner?.uid === this.user.uid;
+
+            if (iAmOwner) {
+                if (opponentStillSeated) {
+                    // Transfer ownership to opponent
+                    updates.tableOwner = {
+                        uid: opponentStillSeated.uid,
+                        name: opponentStillSeated.name,
+                        since: Date.now()
+                    };
+                    console.log('👑 Transferring table ownership to opponent:', opponentStillSeated.name);
+                } else {
+                    // No one left, clear ownership
+                    updates.tableOwner = deleteField();
+                    console.log('👑 Clearing table ownership (no one left)');
+                }
+            }
+
             await setDoc(tRef, updates, { merge: true });
             console.log('✅ Unseated successfully');
             this.showStatus("You've left your seat", "gold");
         } catch (error) {
             console.error('❌ Unseat error:', error);
             this.showStatus("Failed to unseat: " + error.message, "red");
+        }
+    }
+
+    async bootPlayer(side) {
+        if (!this.user) return;
+
+        console.log(`🥾 Booting player from ${side} seat...`);
+
+        const tRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'regions', this.rid, 'tables', this.tid);
+        const freshSnap = await getDoc(tRef);
+        const t = freshSnap.data();
+
+        // Verify I'm the table owner
+        const iAmOwner = t?.tableOwner?.uid === this.user.uid;
+        if (!iAmOwner) {
+            this.showStatus("Only the table owner can boot players!", "red");
+            return;
+        }
+
+        // Verify game is not active
+        if (this.gameState?.status === 'playing') {
+            this.showStatus("Cannot boot during active game!", "red");
+            return;
+        }
+
+        try {
+            const updates = {};
+            const seatKey = side === 'red' ? 'playerRed' : 'playerBlack';
+            const playerName = t?.[seatKey]?.name || 'Player';
+
+            updates[seatKey] = deleteField();
+
+            // Clear any pending battle requests
+            if (t?.battleRequest) {
+                updates.battleRequest = deleteField();
+            }
+
+            await setDoc(tRef, updates, { merge: true });
+            console.log(`✅ Booted ${playerName} successfully`);
+            this.showStatus(`Booted ${playerName} from the table`, "gold");
+
+            // Hide action menu
+            const menu = document.getElementById('action-menu');
+            if (menu) menu.style.display = 'none';
+        } catch (error) {
+            console.error('❌ Boot error:', error);
+            this.showStatus("Failed to boot player: " + error.message, "red");
         }
     }
 
@@ -1162,13 +1369,27 @@ export class XQApp {
 
             console.log('💺 Attempting to sit with:', { myName, myAvatar });
 
-            await setDoc(tRef, { 
-                [seatKey]: { 
-                    uid: this.user.uid, 
-                    name: myName, 
-                    avatar: myAvatar 
-                } 
-            }, { merge: true });
+            // Check if this is the first person sitting (no one else seated)
+            const bothSeatsEmpty = !currentTable.playerRed && !currentTable.playerBlack;
+            const updates = {
+                [seatKey]: {
+                    uid: this.user.uid,
+                    name: myName,
+                    avatar: myAvatar
+                }
+            };
+
+            // If first person sitting, set as table owner
+            if (bothSeatsEmpty) {
+                updates.tableOwner = {
+                    uid: this.user.uid,
+                    name: myName,
+                    since: Date.now()
+                };
+                console.log('👑 Setting as table owner (first to sit)');
+            }
+
+            await setDoc(tRef, updates, { merge: true });
             
             console.log('✅ Successfully saved to Firestore!');
             this.showStatus(`You are now seated as ${side.toUpperCase()}`, "gold");
@@ -1590,6 +1811,19 @@ export class XQApp {
             if (winner) updateData.winner = winner;
         }
 
+        // Add time increment to the player who just moved
+        const increment = this.gameState.timeIncrement || 0;
+        if (increment > 0) {
+            const currentPlayerColor = this.gameState.turn; // The player who just moved
+            if (currentPlayerColor === 'red') {
+                updateData.redTimeLeft = (this.gameState.redTimeLeft || this.redTimeLeft) + increment;
+                console.log(`⏱️ Adding ${increment}s increment to red. New time: ${updateData.redTimeLeft}s`);
+            } else {
+                updateData.blackTimeLeft = (this.gameState.blackTimeLeft || this.blackTimeLeft) + increment;
+                console.log(`⏱️ Adding ${increment}s increment to black. New time: ${updateData.blackTimeLeft}s`);
+            }
+        }
+
         await setDoc(gameRef, updateData, { merge: true });
 
         // Clear selection
@@ -1774,6 +2008,189 @@ export class XQApp {
         }, 1000);
     }
 
+    checkBattleRequestModal() {
+        const battleRequest = this.table?.battleRequest;
+        const modal = document.getElementById('battle-request-modal');
+
+        if (!modal) return;
+
+        // Only show if I'm receiving the request (not the one who sent it)
+        const iAmReceiver = battleRequest && battleRequest.from !== this.user?.uid;
+
+        if (iAmReceiver) {
+            // Show modal
+            modal.style.display = 'block';
+
+            // Update message with requester's name
+            const message = document.getElementById('battle-request-message');
+            if (message) {
+                // Get requester's name from table
+                const isRedRequester = this.table.playerRed?.uid === battleRequest.from;
+                const requesterName = isRedRequester
+                    ? (this.table.playerRed?.name || 'Opponent')
+                    : (this.table.playerBlack?.name || 'Opponent');
+                message.innerText = `${requesterName} requests a battle`;
+            }
+
+            // Start countdown if not already running
+            if (!this.battleRequestCountdownTimer) {
+                this.startBattleRequestCountdown();
+            }
+        } else {
+            // Hide modal
+            modal.style.display = 'none';
+
+            // Clear countdown timer
+            if (this.battleRequestCountdownTimer) {
+                clearInterval(this.battleRequestCountdownTimer);
+                this.battleRequestCountdownTimer = null;
+            }
+        }
+    }
+
+    startBattleRequestCountdown() {
+        let timeLeft = 10;
+        const countdownEl = document.getElementById('battle-request-countdown');
+
+        if (countdownEl) {
+            countdownEl.innerText = timeLeft;
+        }
+
+        this.battleRequestCountdownTimer = setInterval(() => {
+            timeLeft--;
+            if (countdownEl) {
+                countdownEl.innerText = timeLeft;
+            }
+
+            if (timeLeft <= 0) {
+                // Auto-reject
+                this.rejectBattleRequest();
+                clearInterval(this.battleRequestCountdownTimer);
+                this.battleRequestCountdownTimer = null;
+            }
+        }, 1000);
+    }
+
+    async acceptBattleRequest() {
+        console.log('✅ Accepting battle request...');
+
+        // Clear battle request countdown
+        if (this.battleRequestCountdownTimer) {
+            clearInterval(this.battleRequestCountdownTimer);
+            this.battleRequestCountdownTimer = null;
+        }
+
+        // Hide modal
+        const modal = document.getElementById('battle-request-modal');
+        if (modal) modal.style.display = 'none';
+
+        // Clear the battle request from Firestore
+        const tRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'regions', this.rid, 'tables', this.tid);
+        await setDoc(tRef, {
+            battleRequest: deleteField()
+        }, { merge: true });
+
+        // Start the battle
+        await this.engageBattle();
+    }
+
+    async rejectBattleRequest() {
+        console.log('❌ Rejecting battle request...');
+
+        // Clear battle request countdown
+        if (this.battleRequestCountdownTimer) {
+            clearInterval(this.battleRequestCountdownTimer);
+            this.battleRequestCountdownTimer = null;
+        }
+
+        // Hide modal
+        const modal = document.getElementById('battle-request-modal');
+        if (modal) modal.style.display = 'none';
+
+        // Get the current battle request to know who requested it
+        const currentRequest = this.table?.battleRequest;
+
+        // Set a rejection notification for the requester
+        const tRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'regions', this.rid, 'tables', this.tid);
+        await setDoc(tRef, {
+            battleRequest: deleteField(),
+            battleRejection: {
+                requestedBy: currentRequest?.from,
+                rejectedBy: this.user.uid,
+                rejectedByName: this.profile?.playerName || this.user.email.split('@')[0],
+                timestamp: Date.now()
+            }
+        }, { merge: true });
+
+        this.showStatus("Battle request rejected", "gold");
+
+        // Clear the rejection notification after 6 seconds (so requester has time to see it)
+        setTimeout(async () => {
+            await setDoc(tRef, {
+                battleRejection: deleteField()
+            }, { merge: true });
+        }, 6000);
+    }
+
+    checkBattleRejectionNotification() {
+        const battleRejection = this.table?.battleRejection;
+        const notification = document.getElementById('battle-rejected-notification');
+
+        if (!notification) return;
+
+        // Only show if I'm the one who requested the battle
+        const iAmRequester = battleRejection && battleRejection.requestedBy === this.user?.uid;
+
+        if (iAmRequester) {
+            // Show notification
+            notification.style.display = 'block';
+
+            // Update message with rejecter's name
+            const message = document.getElementById('battle-rejected-message');
+            if (message) {
+                message.innerText = `${battleRejection.rejectedByName} declined your battle request`;
+            }
+
+            // Start countdown if not already running
+            if (!this.battleRejectionCountdownTimer) {
+                this.startBattleRejectionCountdown();
+            }
+        } else {
+            // Hide notification
+            notification.style.display = 'none';
+
+            // Clear countdown timer
+            if (this.battleRejectionCountdownTimer) {
+                clearInterval(this.battleRejectionCountdownTimer);
+                this.battleRejectionCountdownTimer = null;
+            }
+        }
+    }
+
+    startBattleRejectionCountdown() {
+        let timeLeft = 5;
+        const countdownEl = document.getElementById('battle-rejected-countdown');
+
+        if (countdownEl) {
+            countdownEl.innerText = timeLeft;
+        }
+
+        this.battleRejectionCountdownTimer = setInterval(() => {
+            timeLeft--;
+            if (countdownEl) {
+                countdownEl.innerText = timeLeft;
+            }
+
+            if (timeLeft <= 0) {
+                // Auto-close
+                const notification = document.getElementById('battle-rejected-notification');
+                if (notification) notification.style.display = 'none';
+                clearInterval(this.battleRejectionCountdownTimer);
+                this.battleRejectionCountdownTimer = null;
+            }
+        }, 1000);
+    }
+
     showStatus(msg, color = "gold") {
         const el = document.getElementById('chat-msg');
         if (el) {
@@ -1856,7 +2273,7 @@ export class XQApp {
         console.log('🎭 showMoveAnimation called:', type, data);
 
         // Show game-over image even if animations are disabled (for all game-ending results)
-        if ((type === 'checkmate' || type === 'perpetual-check' || type === 'perpetual-chase' || type === 'resignation') && data.winner) {
+        if ((type === 'checkmate' || type === 'perpetual-check' || type === 'perpetual-chase' || type === 'resignation' || type === 'timeout') && data.winner) {
             this.showGameOverImage(data.winner);
         }
 
@@ -1963,6 +2380,19 @@ export class XQApp {
                 chineseEl.style.whiteSpace = 'pre-line';
                 englishEl.style.whiteSpace = 'pre-line';
                 break;
+            case 'timeout':
+                const timeoutWinner = data.winner === 'red' ? '红胜' : '黑胜';
+                const timeoutWinnerEn = data.winner === 'red' ? 'RED WINS' : 'BLACK WINS';
+                const timeoutLoser = data.loser === 'red' ? '红' : '黑';
+                icon = '⏰';
+                chinese = `${timeoutLoser}方超时\n${timeoutWinner}`;
+                english = `TIME OUT!\n${timeoutWinnerEn}`;
+                sound = `${timeoutLoser}方超时 ${timeoutWinner}`;
+                duration = 5000;
+                chineseEl.style.fontSize = '2rem';
+                chineseEl.style.whiteSpace = 'pre-line';
+                englishEl.style.whiteSpace = 'pre-line';
+                break;
             default:
                 return;
         }
@@ -2033,11 +2463,45 @@ export class XQApp {
         console.log('🖼️ Computed opacity:', window.getComputedStyle(overlayEl).opacity);
         console.log('🖼️ Computed visibility:', window.getComputedStyle(overlayEl).visibility);
 
+        // Transfer table ownership to winner
+        this.transferOwnershipToWinner(winner);
+
         // Hide overlay after 10 seconds
         setTimeout(() => {
             overlayEl.classList.remove('show');
             console.log('🎬 Game over image hidden - removed "show" class');
         }, 10000);
+    }
+
+    async transferOwnershipToWinner(winner) {
+        if (!this.table) return;
+
+        const winnerPlayer = winner === 'red' ? this.table.playerRed : this.table.playerBlack;
+
+        if (!winnerPlayer) {
+            console.log('⚠️ Winner player not found, skipping ownership transfer');
+            return;
+        }
+
+        console.log('👑 Transferring table ownership to winner:', winner, winnerPlayer.name);
+
+        try {
+            const tRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'regions', this.rid, 'tables', this.tid);
+            await setDoc(tRef, {
+                tableOwner: {
+                    uid: winnerPlayer.uid,
+                    name: winnerPlayer.name,
+                    since: Date.now()
+                }
+            }, { merge: true });
+
+            // Show notification about new ownership
+            const winnerName = winnerPlayer.name.toUpperCase();
+            this.showStatus(`👑 ${winnerName} is now the Table Owner!`, "gold");
+            console.log('✅ Table ownership transferred to winner');
+        } catch (error) {
+            console.error('❌ Failed to transfer ownership:', error);
+        }
     }
 
     /**
@@ -2251,8 +2715,8 @@ export class XQApp {
 
         // Build PGN content
         const date = new Date().toISOString().split('T')[0].replace(/-/g, '.');
-        const redPlayer = this.table?.playerRed?.playerName || 'Red Player';
-        const blackPlayer = this.table?.playerBlack?.playerName || 'Black Player';
+        const redPlayer = this.table?.playerRed?.name || 'Red Player';
+        const blackPlayer = this.table?.playerBlack?.name || 'Black Player';
 
         let result = '*'; // Ongoing
         if (this.gameState.status === 'checkmate' || this.gameState.status === 'perpetual-check' || this.gameState.status === 'perpetual-chase') {
@@ -2280,12 +2744,16 @@ export class XQApp {
 
         pgn += `${result}\n`;
 
-        // Download as file
+        // Download as file with unique timestamp
+        const now = new Date();
+        const time = now.toTimeString().split(' ')[0].substring(0, 5).replace(':', ''); // Format: HHMM
+        const filename = `xiangqi-game-${date}-${time}.pgn`;
+
         const blob = new Blob([pgn], { type: 'text/plain' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `xiangqi-game-${date}.pgn`;
+        a.download = filename;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -2309,8 +2777,8 @@ export class XQApp {
             id: gameId,
             pgn: pgn,
             timestamp: timestamp,
-            redPlayer: this.table?.playerRed?.playerName || 'Red Player',
-            blackPlayer: this.table?.playerBlack?.playerName || 'Black Player',
+            redPlayer: this.table?.playerRed?.name || 'Red Player',
+            blackPlayer: this.table?.playerBlack?.name || 'Black Player',
             result: this.gameState?.status || 'ongoing'
         };
 
@@ -2406,11 +2874,16 @@ export class XQApp {
     }
 
     playNextTrack() {
-        // Move to next track (loop back to start after last track)
-        this.currentTrackIndex = (this.currentTrackIndex + 1) % this.musicTracks.length;
+        // Pick a random track (avoid repeating the same track)
+        let newIndex;
+        do {
+            newIndex = Math.floor(Math.random() * this.musicTracks.length);
+        } while (newIndex === this.currentTrackIndex && this.musicTracks.length > 1);
+
+        this.currentTrackIndex = newIndex;
 
         const nextTrack = this.musicTracks[this.currentTrackIndex];
-        console.log('🎵 Loading next track:', nextTrack, `(Track ${this.currentTrackIndex + 1}/${this.musicTracks.length})`);
+        console.log('🎵 Loading next track (random):', nextTrack, `(Track ${this.currentTrackIndex + 1}/${this.musicTracks.length})`);
 
         if (this.ambientMusic) {
             this.ambientMusic.src = nextTrack;

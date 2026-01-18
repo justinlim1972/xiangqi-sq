@@ -74,6 +74,7 @@
             to { transform: scale(1); opacity: 1; }
         }
 
+
         /* PIECE STYLING */
         .piece { 
             position: absolute; width: 9.1%; height: 8.2%; 
@@ -291,6 +292,21 @@
             0%, 100% { box-shadow: 0 0 15px rgba(241, 196, 15, 0.4); }
             50% { box-shadow: 0 0 30px rgba(241, 196, 15, 0.8); }
         }
+        @keyframes stress-pulse {
+            0%, 100% {
+                box-shadow: 0 0 15px rgba(255, 0, 0, 0.6);
+                border-color: #ff0000;
+                background: #2a0000;
+            }
+            50% {
+                box-shadow: 0 0 35px rgba(255, 0, 0, 1);
+                border-color: #ff3333;
+                background: #3a0000;
+            }
+        }
+        .p-card.time-stress {
+            animation: stress-pulse 1s infinite;
+        }
     </style>
 </head>
 <body>
@@ -363,6 +379,7 @@
         </svg>
         <div id="hints-layer"></div>
         <div id="pieces-layer"></div>
+
         <div id="game-over-overlay">
             <img id="game-over-image" src="" alt="Game Over">
         </div>
@@ -384,7 +401,10 @@
         <div id="player-card-black" class="p-card" style="flex-direction: column; align-items: stretch; gap: 8px; cursor: pointer; transition: 0.2s;">
             <div style="display: flex; align-items: center; gap: 12px;">
                 <div class="p-avatar"><img src="/lobby/1.JPG" id="avatar-black"></div>
-                <span id="name-black" style="flex-grow: 1;">Empty Slot</span>
+                <div style="flex-grow: 1; display: flex; align-items: center; gap: 8px;">
+                    <span id="name-black">Empty Slot</span>
+                    <span id="owner-badge-black" style="display: none; font-size: 1.2rem; filter: drop-shadow(0 0 8px rgba(241, 196, 15, 0.8));" title="Table Owner">👑</span>
+                </div>
             </div>
             <div id="black-timer" style="
                 display: none;
@@ -403,7 +423,10 @@
         <div id="player-card-red" class="p-card" style="flex-direction: column; align-items: stretch; gap: 8px; cursor: pointer; transition: 0.2s;">
             <div style="display: flex; align-items: center; gap: 12px;">
                 <div class="p-avatar"><img src="/lobby/1.JPG" id="avatar-red"></div>
-                <span id="name-red" style="flex-grow: 1;">Empty Slot</span>
+                <div style="flex-grow: 1; display: flex; align-items: center; gap: 8px;">
+                    <span id="name-red">Empty Slot</span>
+                    <span id="owner-badge-red" style="display: none; font-size: 1.2rem; filter: drop-shadow(0 0 8px rgba(241, 196, 15, 0.8));" title="Table Owner">👑</span>
+                </div>
             </div>
             <div id="red-timer" style="
                 display: none;
@@ -437,6 +460,30 @@
                     <button id="btn-accept-draw-modal" class="btn-action" style="background: #27ae60; color: white; padding: 12px 20px; font-size: 0.9rem; border-radius: 10px; border: none; cursor: pointer; font-weight: 900; flex: 1;">✅ ACCEPT</button>
                     <button id="btn-reject-draw-modal" class="btn-action" style="background: #cd3333; color: white; padding: 12px 20px; font-size: 0.9rem; border-radius: 10px; border: none; cursor: pointer; font-weight: 900; flex: 1;">❌ REJECT</button>
                 </div>
+            </div>
+        </div>
+
+        <!-- Battle Request Modal (restricted to sidebar area) -->
+        <div id="battle-request-modal" style="display: none; margin-top: 10px; background: #0a0a0a; border: 3px solid var(--gold); border-radius: 15px; padding: 20px; animation: pulse 2s infinite;">
+            <div style="text-align: center;">
+                <div style="font-size: 2.5rem; margin-bottom: 8px;">⚔️</div>
+                <h2 style="color: var(--gold); font-size: 1.1rem; margin-bottom: 8px; font-weight: 900; letter-spacing: 1px;">BATTLE REQUEST</h2>
+                <p id="battle-request-message" style="color: #eee; font-size: 0.85rem; margin-bottom: 12px; line-height: 1.4;">Player requests a battle</p>
+                <div id="battle-request-countdown" style="font-size: 3rem; font-weight: 900; color: var(--gold); font-family: 'Courier New', monospace; margin-bottom: 15px; text-shadow: 0 0 20px rgba(241, 196, 15, 0.6);">10</div>
+                <div style="display: flex; gap: 10px; justify-content: center;">
+                    <button id="btn-accept-battle-modal" class="btn-action" style="background: #27ae60; color: white; padding: 12px 20px; font-size: 0.9rem; border-radius: 10px; border: none; cursor: pointer; font-weight: 900; flex: 1;">✅ ACCEPT</button>
+                    <button id="btn-reject-battle-modal" class="btn-action" style="background: #cd3333; color: white; padding: 12px 20px; font-size: 0.9rem; border-radius: 10px; border: none; cursor: pointer; font-weight: 900; flex: 1;">❌ REJECT</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Battle Request Rejected Notification -->
+        <div id="battle-rejected-notification" style="display: none; margin-top: 10px; background: #0a0a0a; border: 3px solid #cd3333; border-radius: 15px; padding: 20px;">
+            <div style="text-align: center;">
+                <div style="font-size: 2.5rem; margin-bottom: 8px;">❌</div>
+                <h2 style="color: #cd3333; font-size: 1.1rem; margin-bottom: 8px; font-weight: 900; letter-spacing: 1px;">REQUEST DECLINED</h2>
+                <p id="battle-rejected-message" style="color: #eee; font-size: 0.85rem; margin-bottom: 12px; line-height: 1.4;">Your battle request was declined</p>
+                <div id="battle-rejected-countdown" style="font-size: 2rem; font-weight: 900; color: #666; font-family: 'Courier New', monospace; text-shadow: 0 0 10px rgba(0, 0, 0, 0.6);">5</div>
             </div>
         </div>
 
@@ -585,7 +632,7 @@
 </div>
 
 <script type="module">
-    import { XQApp } from "./xq-app.js?v=28";
+    import { XQApp } from "./xq-app.js?v=52";
     // Initialize the Orchestrator which manages all modules (Engine, UI, Firebase)
     window.app = new XQApp();
     window.app.init();
@@ -597,6 +644,15 @@
 
     document.getElementById('btn-reject-draw-modal').onclick = () => {
         window.app.rejectDraw();
+    };
+
+    // Wire up battle request modal buttons
+    document.getElementById('btn-accept-battle-modal').onclick = () => {
+        window.app.acceptBattleRequest();
+    };
+
+    document.getElementById('btn-reject-battle-modal').onclick = () => {
+        window.app.rejectBattleRequest();
     };
 </script>
 
