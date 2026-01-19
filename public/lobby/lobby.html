@@ -33,7 +33,14 @@
         
         .region-section { margin-top: 12px; background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
         .region-header { background: var(--dark); color: white; padding: 10px 20px; display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
+
+        /* Lecture Region Color Scheme */
+        .region-section.lecture { background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%); border: 2px solid #0ea5e9; }
+        .region-section.lecture .region-header { background: linear-gradient(135deg, #0369a1 0%, #0284c7 100%); }
+        .region-section.lecture .table-grid { background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 50%, #f0f9ff 100%); }
+
         .collapse-icon { transition: transform 0.3s ease; font-size: 0.8rem; }
+        .region-section.collapsed .collapse-icon { transform: rotate(-90deg); }
         .region-section.collapsed .table-grid { display: none; }
         
         .table-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 15px; padding: 15px; background: #fafafa; }
@@ -41,6 +48,10 @@
         .chess-table { border: 1px solid #e2e8f0; border-radius: 18px; padding: 12px; text-align: center; background: #fff; transition: 0.2s; position: relative; }
         .chess-table:hover { transform: translateY(-3px); border-color: var(--primary); }
         .chess-table.stale { border: 2px dashed #ef4444; background: #fff1f2; }
+
+        /* Lecture Table Style */
+        .chess-table.lecture { background: linear-gradient(135deg, #ffffff 0%, #dbeafe 100%); border: 2px solid #3b82f6; }
+        .chess-table.lecture:hover { border-color: #2563eb; box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3); }
         
         .table-meta { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
         .status-pill { padding: 2px 8px; border-radius: 12px; font-size: 0.55rem; font-weight: 900; text-transform: uppercase; }
@@ -66,6 +77,46 @@
         .btn-watch:hover { background: #2563eb; }
 
         .btn-reset-stale { background: #000; color: #ef4444; border: 1px solid #ef4444; padding: 5px; border-radius: 8px; margin-top: 5px; width: 100%; font-size: 0.65rem; font-weight: 900; cursor: pointer; }
+
+        /* LOBBY BANNER */
+        .lobby-banner {
+            width: 50%;
+            margin: 20px auto 20px auto;
+            position: relative;
+            overflow: hidden;
+            max-height: 180px;
+        }
+        .lobby-banner img {
+            width: 100%;
+            height: 100%;
+            max-height: 180px;
+            object-fit: cover;
+            object-position: center;
+            display: block;
+            border-radius: 12px;
+        }
+        .banner-glow {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: linear-gradient(90deg,
+                transparent 0%,
+                var(--gold) 20%,
+                var(--primary) 50%,
+                var(--gold) 80%,
+                transparent 100%);
+            box-shadow: 0 0 20px var(--gold), 0 0 30px var(--primary);
+            animation: glow-pulse 3s ease-in-out infinite;
+        }
+        @keyframes glow-pulse {
+            0%, 100% { opacity: 0.6; }
+            50% { opacity: 1; }
+        }
+        header {
+            box-shadow: 0 0 30px rgba(241, 196, 15, 0.3), 0 4px 10px rgba(0,0,0,0.1);
+        }
     </style>
 </head>
 <body>
@@ -94,6 +145,12 @@
         <button style="background:var(--dark); color:white; border:none; padding:8px 12px; border-radius:6px; cursor:pointer; font-weight:bold; font-size: 0.75rem;" onclick="handleLogout()">Logout</button>
     </div>
 </header>
+
+<!-- LOBBY BANNER - Art of Warfare Theme -->
+<div class="lobby-banner">
+    <img src="/pictures/lobby.png" alt="Arena for Tactical Brilliance" />
+    <div class="banner-glow"></div>
+</div>
 
 <div id="lobby-container">
     <p style="text-align: center; padding: 60px; color: #94a3b8; font-weight: bold; font-size: 0.9rem;">SYNCHRONIZING REGIONS...</p>
@@ -162,28 +219,56 @@
     };
 
     function listenToRegions() {
-        const q = query(collection(db, "artifacts", appId, "public", "data", "regions"), orderBy("createdAt", "desc"));
-        onSnapshot(q, (snapshot) => {
+        const regionsRef = collection(db, "artifacts", appId, "public", "data", "regions");
+        onSnapshot(regionsRef, (snapshot) => {
             const container = document.getElementById('lobby-container');
             container.innerHTML = snapshot.empty ? "<p style='text-align:center; padding:30px;'>No regions active.</p>" : "";
+
+            // Get all regions and sort manually by order field
+            const regions = [];
             snapshot.forEach(docSnap => {
-                const r = docSnap.data();
+                const data = docSnap.data();
+                regions.push({
+                    id: docSnap.id,
+                    data: data,
+                    order: data.order !== undefined && data.order !== null ? data.order : 0
+                });
+            });
+
+            // Sort by order field (ascending - lower numbers appear first)
+            regions.sort((a, b) => a.order - b.order);
+
+            console.log('🏠 LOBBY - Regions loaded:', regions.map(r => ({ name: r.data.name, order: r.order })));
+
+            regions.forEach(region => {
+                const r = region.data;
                 const section = document.createElement('div');
-                section.className = 'region-section'; section.id = `region-${docSnap.id}`;
+
+                // Add 'lecture' class for lecture regions
+                const isLecture = r.type === 'lecture';
+                section.className = `region-section collapsed ${isLecture ? 'lecture' : ''}`;
+                section.id = `region-${region.id}`;
+
+                // Show different info for lecture vs game regions
+                const icon = isLecture ? '🎓' : '🎮';
+                const info = isLecture
+                    ? `Max ${r.maxStudents || 50} students/table`
+                    : (r.baseTime && r.increment ? `${r.baseTime}m+${r.increment}s` : 'Settings needed');
+
                 section.innerHTML = `
-                    <div class="region-header" onclick="toggleRegion('${docSnap.id}')">
-                        <span><strong>${r.name}</strong> <small style="margin-left:8px; opacity:0.5;">${r.baseTime}m+${r.increment}s</small></span>
+                    <div class="region-header" onclick="toggleRegion('${region.id}')">
+                        <span><strong>${icon} ${r.name}</strong> <small style="margin-left:8px; opacity:0.5;">${info}</small></span>
                         <span class="collapse-icon">▼</span>
                     </div>
-                    <div class="table-grid" id="tables-${docSnap.id}"></div>
+                    <div class="table-grid" id="tables-${region.id}"></div>
                 `;
                 container.appendChild(section);
-                listenToTables(docSnap.id);
+                listenToTables(region.id, isLecture); // Pass isLecture flag
             });
         });
     }
 
-    function listenToTables(regionId) {
+    function listenToTables(regionId, isLecture = false) {
         const q = query(collection(db, "artifacts", appId, "public", "data", "regions", regionId, "tables"), orderBy("order", "asc"));
         onSnapshot(q, (snapshot) => {
             const grid = document.getElementById(`tables-${regionId}`);
@@ -193,26 +278,41 @@
                 const t = tableDoc.data();
                 const isDoubleSat = t.playerRed && t.playerBlack && t.playerRed.uid === t.playerBlack.uid;
                 const isFull = t.playerRed && t.playerBlack;
-                
+
                 let status = !t.playerRed && !t.playerBlack ? 'open' : (isFull ? 'busy' : 'waiting');
                 if (isDoubleSat) status = 'violation';
 
                 const tile = mahjongTiles[Math.floor(Math.random() * mahjongTiles.length)];
-                const card = document.createElement('div'); 
-                card.className = `chess-table ${isDoubleSat ? 'stale' : ''}`;
-                
-                const btnLabel = isFull ? 'Watch Match' : 'Join Match';
-                const btnClass = isFull ? 'btn-watch' : 'btn-enter';
+                const card = document.createElement('div');
 
-                // LOGIC: Admins always see the entry button to inspect, even if double-sat
-                const entryButtonHTML = `<button class="${btnClass}" onclick="window.location.href=window.location.origin + '/game/board.html?id=${tableDoc.id}&rid=${regionId}&tile=${encodeURIComponent(tile)}'">${btnLabel}</button>`;
+                // Add 'lecture' class for lecture tables
+                card.className = `chess-table ${isDoubleSat ? 'stale' : ''} ${isLecture ? 'lecture' : ''}`;
 
-                card.innerHTML = `
-                    <div class="table-meta">
-                        <span class="status-pill status-${status}">${isDoubleSat ? 'FIX REQUIRED' : status}</span>
-                    </div>
-                    <span class="mahjong-icon">${tile}</span><strong class="table-name-txt">${t.tableName}</strong>
-                    <div class="roster">
+                // Different button label and URL for lecture halls
+                const btnLabel = isLecture ? '🎓 Enter Lecture' : (isFull ? 'Watch Match' : 'Join Match');
+                const btnClass = isLecture ? 'btn-enter' : (isFull ? 'btn-watch' : 'btn-enter');
+                const boardUrl = isLecture ? '/lecture/lecture_board.html' : '/game/board.html';
+                const entryButtonHTML = `<button class="${btnClass}" onclick="window.location.href=window.location.origin + '${boardUrl}?id=${tableDoc.id}&rid=${regionId}&tile=${encodeURIComponent(tile)}'">${btnLabel}</button>`;
+
+                // Different icon and roster for lecture halls
+                const iconDisplay = isLecture ? '🎓' : tile;
+                const rosterHTML = isLecture
+                    ? `<div class="roster" style="background: linear-gradient(135deg, #dbeafe 0%, #eff6ff 100%); border: 1px solid #93c5fd;">
+                        <div class="slot">
+                            <div class="mini-avatar"><img src="${t.lecturer?.avatar || '/lobby/1.JPG'}"></div>
+                            <span class="slot-name" style="color:#0369a1; font-weight:900;">👨‍🏫 ${t.lecturer?.name || 'No instructor yet'}</span>
+                        </div>
+                        <div style="padding: 8px; background: #f0f9ff; border-radius: 6px; margin-top: 4px;">
+                            <p style="font-size: 0.65rem; line-height: 1.3; margin: 0; color: #1e40af; font-weight: 600;">
+                                📢 ${t.announcement || 'Welcome to the lecture! Join to learn advanced Xiangqi strategies.'}
+                            </p>
+                        </div>
+                        <div style="margin-top: 6px; display: flex; justify-content: space-between; align-items: center;">
+                            <span style="font-size: 0.65rem; color: #64748b; font-weight: 700;">👥 ${t.students || 0} students</span>
+                            <span style="font-size: 0.65rem; color: #0369a1; font-weight: 700;">🔓 Open</span>
+                        </div>
+                    </div>`
+                    : `<div class="roster">
                         <div class="slot ${!t.playerRed?'empty':''}">
                             <div class="mini-avatar"><img src="${t.playerRed?.avatar || '/lobby/1.JPG'}"></div>
                             <span class="slot-name">${t.playerRed?.name || 'Waiting...'} ${isDoubleSat?'(⚠️)':''}</span>
@@ -221,7 +321,14 @@
                             <div class="mini-avatar"><img src="${t.playerBlack?.avatar || '/lobby/1.JPG'}"></div>
                             <span class="slot-name">${t.playerBlack?.name || 'Waiting...'} ${isDoubleSat?'(⚠️)':''}</span>
                         </div>
+                    </div>`;
+
+                card.innerHTML = `
+                    <div class="table-meta">
+                        <span class="status-pill status-${status}">${isDoubleSat ? 'FIX REQUIRED' : status}</span>
                     </div>
+                    <span class="mahjong-icon">${iconDisplay}</span><strong class="table-name-txt">${t.tableName}</strong>
+                    ${rosterHTML}
                     ${!isDoubleSat || window.isAdmin ? entryButtonHTML : `<p style='font-size:0.6rem; color:#ef4444; font-weight:bold;'>Table Stale: Await Admin Reset</p>`}
                     ${isDoubleSat && window.isAdmin ? `<button class="btn-reset-stale" onclick="forceResetTable('${regionId}', '${tableDoc.id}')">FORCE FULL RESET</button>` : ''}
                 `;

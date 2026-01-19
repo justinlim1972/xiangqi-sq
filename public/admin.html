@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SG Xiangqi - Admin Command</title>
+    <!-- v2.0 - Lecture Hall Support -->
     <style>
         :root { --primary: #cd3333; --dark: #1e293b; --bg: #f8fafc; --gold: #f1c40f; }
         body { font-family: 'Segoe UI', sans-serif; background: var(--bg); margin: 0; padding: 20px; color: #333; }
@@ -26,6 +27,10 @@
         
         .btn-del-region { position: absolute; top: 10px; right: 10px; background: none; border: none; color: #ccc; cursor: pointer; font-size: 1.2rem; }
         .btn-del-region:hover { color: #ef4444; }
+
+        .region-controls { position: absolute; top: 10px; right: 40px; display: flex; flex-direction: column; gap: 2px; }
+        .btn-reorder { background: none; border: none; color: #94a3b8; cursor: pointer; font-size: 0.9rem; padding: 2px 5px; line-height: 1; }
+        .btn-reorder:hover { color: var(--primary); }
 
         /* Table Editor */
         .table-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }
@@ -60,7 +65,8 @@
 
 <header>
     <h1>SG Xiangqi :: Admin Terminal</h1>
-    <div>
+    <div style="display: flex; gap: 10px;">
+        <button class="btn" style="background:var(--gold); color:#000; font-weight:900;" onclick="forceFixOrdering()">🔧 Fix Region Order</button>
         <button class="btn" style="background:rgba(255,255,255,0.2); color:white;" onclick="window.location.href=window.location.origin + '/lobby/lobby.html'">Exit to Lobby</button>
     </div>
 </header>
@@ -77,12 +83,14 @@
 
         <!-- NEW: REGION EDITOR -->
         <div id="region-editor-card" class="card" style="display:none;">
-            <h2>Region Settings</h2>
+            <h2>Region Settings <span id="region-type-badge" style="font-size:0.8rem; padding:4px 8px; border-radius:6px; background:#e2e8f0; color:#64748b;"></span></h2>
             <div class="form-group">
                 <label>Region Name</label>
                 <input type="text" id="edit-reg-name">
             </div>
-            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+
+            <!-- Game Region Settings -->
+            <div id="edit-game-fields" style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
                 <div class="form-group">
                     <label>Base (Min)</label>
                     <input type="number" id="edit-reg-time">
@@ -92,6 +100,23 @@
                     <input type="number" id="edit-reg-inc">
                 </div>
             </div>
+
+            <!-- Lecture Region Settings -->
+            <div id="edit-lecture-fields" style="display:none;">
+                <div class="form-group">
+                    <label>Lecturer Password</label>
+                    <input type="password" id="edit-reg-password" placeholder="Enter new password (leave blank to keep current)">
+                </div>
+                <div class="form-group">
+                    <label>Max Tables</label>
+                    <input type="number" id="edit-reg-max-tables" min="1" max="10">
+                </div>
+                <div class="form-group">
+                    <label>Max Students per Table</label>
+                    <input type="number" id="edit-reg-max-students" min="1" max="100">
+                </div>
+            </div>
+
             <button class="btn btn-success" style="width:100%" onclick="updateRegionSettings()">Save Region Details</button>
         </div>
     </aside>
@@ -116,13 +141,53 @@
 <!-- MODALS -->
 <div id="region-modal" class="modal">
     <div class="modal-content">
-        <h3>Create New Region</h3>
-        <div class="form-group"><label>Region Name</label><input type="text" id="reg-name" placeholder="e.g. Jurong East"></div>
-        <div class="form-group"><label>Base Time (Minutes)</label><input type="number" id="reg-time" value="10"></div>
-        <div class="form-group"><label>Increment (Seconds)</label><input type="number" id="reg-inc" value="5"></div>
-        <div style="display:flex; gap:10px; margin-top:20px;">
-            <button class="btn btn-success" style="flex:1" onclick="createRegion()">Create</button>
-            <button class="btn btn-danger" onclick="closeModals()">Cancel</button>
+        <h3 style="margin-top: 0; margin-bottom: 25px; font-size: 1.3rem;">Create New Region</h3>
+
+        <!-- Region Type Selection - MUST BE FIRST -->
+        <div class="form-group">
+            <label style="font-size: 0.85rem; color: #475569;">REGION TYPE</label>
+            <select id="reg-type" onchange="toggleLectureFields()" style="width: 100%; padding: 12px; border: 2px solid #cbd5e1; border-radius: 8px; font-size: 1rem; cursor: pointer;">
+                <option value="game">🎮 Game Region (Normal Play)</option>
+                <option value="lecture">🎓 Lecture Hall (Teaching)</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label style="font-size: 0.85rem; color: #475569;">REGION NAME</label>
+            <input type="text" id="reg-name" placeholder="e.g. Jurong East" style="font-size: 1rem;">
+        </div>
+
+        <!-- Game Region Fields -->
+        <div id="game-fields">
+            <div class="form-group">
+                <label style="font-size: 0.85rem; color: #475569;">BASE TIME (MINUTES)</label>
+                <input type="number" id="reg-time" value="10" style="font-size: 1rem;">
+            </div>
+            <div class="form-group">
+                <label style="font-size: 0.85rem; color: #475569;">INCREMENT (SECONDS)</label>
+                <input type="number" id="reg-inc" value="5" style="font-size: 1rem;">
+            </div>
+        </div>
+
+        <!-- Lecture Region Fields (Hidden by default) -->
+        <div id="lecture-fields" style="display:none;">
+            <div class="form-group">
+                <label style="font-size: 0.85rem; color: #475569;">LECTURER PASSWORD</label>
+                <input type="password" id="reg-password" placeholder="Enter password for lecturers" style="font-size: 1rem;">
+            </div>
+            <div class="form-group">
+                <label style="font-size: 0.85rem; color: #475569;">MAX TABLES (1-10)</label>
+                <input type="number" id="reg-max-tables" value="3" min="1" max="10" style="font-size: 1rem;">
+            </div>
+            <div class="form-group">
+                <label style="font-size: 0.85rem; color: #475569;">MAX STUDENTS/OBSERVERS PER TABLE</label>
+                <input type="number" id="reg-max-students" value="50" min="1" max="100" style="font-size: 1rem;">
+            </div>
+        </div>
+
+        <div style="display:flex; gap:10px; margin-top:25px;">
+            <button class="btn btn-success" style="flex:1; font-size: 1rem; padding: 12px;" onclick="createRegion()">Create</button>
+            <button class="btn btn-danger" style="font-size: 1rem; padding: 12px;" onclick="closeModals()">Cancel</button>
         </div>
     </div>
 </div>
@@ -154,10 +219,14 @@
 
     onAuthStateChanged(auth, async (user) => {
         if (!user) { window.location.href = window.location.origin + '/index.html'; return; }
-        
-        onSnapshot(doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'data'), (snap) => {
+
+        onSnapshot(doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'data'), async (snap) => {
             if (snap.exists() && snap.data().role === 'admin') {
                 document.getElementById('auth-guard').style.display = 'none';
+
+                // Migrate existing regions to have order field
+                await migrateRegionOrders();
+
                 loadRegions();
             } else {
                 window.location.href = window.location.origin + '/lobby/lobby.html';
@@ -165,37 +234,156 @@
         });
     });
 
+    async function migrateRegionOrders() {
+        try {
+            const regionsRef = collection(db, "artifacts", appId, "public", "data", "regions");
+            const snapshot = await getDocs(regionsRef);
+
+            // Get all regions
+            const regions = [];
+            snapshot.forEach(doc => {
+                const data = doc.data();
+                regions.push({
+                    id: doc.id,
+                    ref: doc.ref,
+                    order: data.order,
+                    createdAt: data.createdAt
+                });
+            });
+
+            console.log('🔍 Migration check - All regions:', regions.map(r => ({ id: r.id, order: r.order, type: typeof r.order })));
+
+            // Check if migration is needed:
+            // 1. Any region missing order field, OR
+            // 2. All regions have the same order value (collision)
+            const needsMigration = regions.some(r => r.order === undefined || r.order === null);
+            const orderValues = regions.map(r => r.order).filter(o => o !== undefined && o !== null);
+
+            console.log('🔍 Raw orderValues:', orderValues, 'Types:', orderValues.map(v => typeof v));
+            console.log('🔍 First value:', orderValues[0], 'All equal to first?', orderValues.every(v => v === orderValues[0]));
+
+            const allSameOrder = orderValues.length >= 2 && orderValues.every(v => v === orderValues[0]);
+
+            console.log('🔍 needsMigration:', needsMigration, 'allSameOrder:', allSameOrder, 'orderValues.length:', orderValues.length);
+
+            if (!needsMigration && !allSameOrder) {
+                console.log('✅ All regions already have unique order values');
+                return;
+            }
+
+            console.log('🔄 Migrating region orders based on createdAt...', needsMigration ? '(missing fields)' : '(duplicate values)');
+
+            // Sort by createdAt (newest first)
+            regions.sort((a, b) => {
+                const timeA = a.createdAt?.toMillis?.() || 0;
+                const timeB = b.createdAt?.toMillis?.() || 0;
+                return timeB - timeA; // Descending (newest first)
+            });
+
+            // Assign orders (newest gets highest number)
+            const updates = [];
+            regions.forEach((region, index) => {
+                const order = (regions.length - index) * 1000;
+                console.log(`  Setting order ${order} for region: ${region.id}`);
+                updates.push(
+                    updateDoc(region.ref, { order: order })
+                );
+            });
+
+            await Promise.all(updates);
+            console.log('✅ Region order migration complete');
+        } catch (e) {
+            console.error('❌ Migration error:', e);
+            console.error('Error details:', e.message, e.code);
+            // Don't block the UI if migration fails
+        }
+    }
+
     function loadRegions() {
-        const q = query(collection(db, "artifacts", appId, "public", "data", "regions"), orderBy("createdAt", "desc"));
-        onSnapshot(q, (snapshot) => {
+        // Try to load with order field, fallback to createdAt if index doesn't exist
+        const regionsRef = collection(db, "artifacts", appId, "public", "data", "regions");
+
+        onSnapshot(regionsRef, (snapshot) => {
             const list = document.getElementById('region-list');
             list.innerHTML = "";
+
+            // Get all regions and sort manually by order field
+            const regions = [];
             snapshot.forEach(snap => {
-                const r = snap.data();
+                const data = snap.data();
+                regions.push({
+                    id: snap.id,
+                    data: data,
+                    order: data.order !== undefined && data.order !== null ? data.order : 0
+                });
+            });
+
+            // Sort by order field (ascending)
+            regions.sort((a, b) => a.order - b.order);
+
+            console.log('📋 Regions loaded and sorted:', regions.map(r => ({ name: r.data.name, order: r.order })));
+
+            regions.forEach((region, index) => {
+                const r = region.data;
                 const div = document.createElement('div');
-                div.className = `item ${activeRegionId === snap.id ? 'active' : ''}`;
-                div.onclick = () => selectRegion(snap.id, r);
+                div.className = `item ${activeRegionId === region.id ? 'active' : ''}`;
+                div.onclick = () => selectRegion(region.id, r);
+
+                const typeIcon = r.type === 'lecture' ? '🎓' : '🎮';
+                const typeInfo = r.type === 'lecture'
+                    ? `Max ${r.maxTables || 3} tables, ${r.maxStudents || 50} students`
+                    : `${r.baseTime}m + ${r.increment}s`;
+
+                // Show up arrow unless first, show down arrow unless last
+                const showUp = index > 0;
+                const showDown = index < regions.length - 1;
+
                 div.innerHTML = `
-                    <strong>${r.name}</strong><small>${r.baseTime}m + ${r.increment}s</small>
-                    <button class="btn-del-region" onclick="event.stopPropagation(); deleteRegion('${snap.id}')">×</button>
+                    <strong>${typeIcon} ${r.name}</strong><small>${typeInfo}</small>
+                    <div class="region-controls">
+                        ${showUp ? `<button class="btn-reorder" onclick="event.stopPropagation(); moveRegion('${region.id}', 'up')" title="Move Up">▲</button>` : ''}
+                        ${showDown ? `<button class="btn-reorder" onclick="event.stopPropagation(); moveRegion('${region.id}', 'down')" title="Move Down">▼</button>` : ''}
+                    </div>
+                    <button class="btn-del-region" onclick="event.stopPropagation(); deleteRegion('${region.id}')">×</button>
                 `;
                 list.appendChild(div);
             });
         });
     }
 
+    let currentRegionType = 'game'; // Track current region type
+
     window.selectRegion = (rid, data) => {
         activeRegionId = rid;
-        
+        currentRegionType = data.type || 'game'; // Store region type
+
         // Show Region Editor and populate
         document.getElementById('region-editor-card').style.display = 'block';
         document.getElementById('edit-reg-name').value = data.name;
-        document.getElementById('edit-reg-time').value = data.baseTime;
-        document.getElementById('edit-reg-inc').value = data.increment;
+
+        // Set region type badge
+        const isLecture = data.type === 'lecture';
+        const badge = document.getElementById('region-type-badge');
+        badge.textContent = isLecture ? '🎓 LECTURE HALL' : '🎮 GAME REGION';
+        badge.style.background = isLecture ? '#dbeafe' : '#e2e8f0';
+        badge.style.color = isLecture ? '#1e40af' : '#64748b';
+
+        // Show/hide appropriate fields
+        if (isLecture) {
+            document.getElementById('edit-game-fields').style.display = 'none';
+            document.getElementById('edit-lecture-fields').style.display = 'block';
+            document.getElementById('edit-reg-max-tables').value = data.maxTables || 3;
+            document.getElementById('edit-reg-max-students').value = data.maxStudents || 50;
+        } else {
+            document.getElementById('edit-game-fields').style.display = 'grid';
+            document.getElementById('edit-lecture-fields').style.display = 'none';
+            document.getElementById('edit-reg-time').value = data.baseTime;
+            document.getElementById('edit-reg-inc').value = data.increment;
+        }
 
         document.getElementById('add-table-btn').style.display = 'block';
         document.getElementById('mass-reset-btn').style.display = 'block';
-        
+
         loadRegions();
         loadTables(rid);
     };
@@ -203,15 +391,35 @@
     window.updateRegionSettings = async () => {
         if (!activeRegionId) return;
         const name = document.getElementById('edit-reg-name').value;
-        const time = parseInt(document.getElementById('edit-reg-time').value);
-        const inc = parseInt(document.getElementById('edit-reg-inc').value);
 
         if (!name) return alert("Region name required.");
 
         try {
-            await updateDoc(doc(db, "artifacts", appId, "public", "data", "regions", activeRegionId), {
-                name, baseTime: time, increment: inc
-            });
+            // Get current region data to check type
+            const regionDoc = await getDoc(doc(db, "artifacts", appId, "public", "data", "regions", activeRegionId));
+            const currentData = regionDoc.data();
+            const isLecture = currentData.type === 'lecture';
+
+            const updateData = { name };
+
+            if (isLecture) {
+                // Lecture region updates
+                updateData.maxTables = parseInt(document.getElementById('edit-reg-max-tables').value);
+                updateData.maxStudents = parseInt(document.getElementById('edit-reg-max-students').value);
+
+                // Update password only if a new one is provided
+                const newPassword = document.getElementById('edit-reg-password').value;
+                if (newPassword) {
+                    // Simple hash (in production, use bcrypt or similar)
+                    updateData.passwordHash = btoa(newPassword);
+                }
+            } else {
+                // Game region updates
+                updateData.baseTime = parseInt(document.getElementById('edit-reg-time').value);
+                updateData.increment = parseInt(document.getElementById('edit-reg-inc').value);
+            }
+
+            await updateDoc(doc(db, "artifacts", appId, "public", "data", "regions", activeRegionId), updateData);
             alert("Region details updated successfully.");
         } catch (e) { alert("Error: " + e.message); }
     };
@@ -219,20 +427,32 @@
     function loadTables(rid) {
         if (tablesUnsubscribe) tablesUnsubscribe();
         const q = query(collection(db, "artifacts", appId, "public", "data", "regions", rid, "tables"), orderBy("order", "asc"));
-        
+
         tablesUnsubscribe = onSnapshot(q, (snapshot) => {
             const container = document.getElementById('table-container');
             container.innerHTML = "";
+            const isLecture = currentRegionType === 'lecture';
+
             snapshot.forEach(tableSnap => {
                 const t = tableSnap.data();
                 const card = document.createElement('div');
                 card.className = "table-card";
+
+                // Different fields for lecture vs game tables
+                const announcementField = isLecture
+                    ? `<div class="form-group">
+                        <label>📢 Announcement</label>
+                        <textarea id="announcement-${tableSnap.id}" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:8px; resize:vertical; min-height:60px; box-sizing:border-box; font-family:inherit;">${t.announcement || ''}</textarea>
+                    </div>`
+                    : '';
+
                 card.innerHTML = `
-                    <h3>TABLE: ${tableSnap.id}</h3>
+                    <h3>${isLecture ? '🎓' : '🎮'} TABLE: ${tableSnap.id}</h3>
                     <div class="form-group">
                         <label>Display Name</label>
                         <input type="text" id="name-${tableSnap.id}" value="${t.tableName || ''}">
                     </div>
+                    ${announcementField}
                     <div style="display:grid; grid-template-columns: 1fr 1fr; gap:5px; margin-top:10px;">
                         <button class="btn btn-success btn-sm" onclick="saveTable('${tableSnap.id}')">Save</button>
                         <button class="btn btn-danger btn-sm" onclick="deleteTable('${tableSnap.id}')">Delete</button>
@@ -278,12 +498,129 @@
 
     window.saveTable = async (tid) => {
         const newName = document.getElementById(`name-${tid}`).value;
-        await updateDoc(doc(db, "artifacts", appId, "public", "data", "regions", activeRegionId, "tables", tid), { tableName: newName });
+        const updateData = { tableName: newName };
+
+        // If lecture region, also save announcement
+        if (currentRegionType === 'lecture') {
+            const announcementEl = document.getElementById(`announcement-${tid}`);
+            if (announcementEl) {
+                updateData.announcement = announcementEl.value;
+            }
+        }
+
+        await updateDoc(doc(db, "artifacts", appId, "public", "data", "regions", activeRegionId, "tables", tid), updateData);
+        alert("Table saved successfully!");
     };
 
     window.deleteTable = async (tid) => {
         if (confirm("Delete this table forever?")) {
             await deleteDoc(doc(db, "artifacts", appId, "public", "data", "regions", activeRegionId, "tables", tid));
+        }
+    };
+
+    window.forceFixOrdering = async () => {
+        alert('Function called!'); // TEST: Does this show?
+        console.log('🔧 FORCE FIX ORDERING - Manual trigger');
+
+        try {
+            const regionsRef = collection(db, "artifacts", appId, "public", "data", "regions");
+            const snapshot = await getDocs(regionsRef);
+
+            const regions = [];
+            snapshot.forEach(doc => {
+                const data = doc.data();
+                regions.push({
+                    id: doc.id,
+                    ref: doc.ref,
+                    order: data.order,
+                    createdAt: data.createdAt,
+                    name: data.name
+                });
+            });
+
+            console.log('📋 Current regions:', regions.map(r => ({ name: r.name, order: r.order })));
+
+            // Sort by createdAt (newest first to match existing logic)
+            regions.sort((a, b) => {
+                const timeA = a.createdAt?.toMillis?.() || 0;
+                const timeB = b.createdAt?.toMillis?.() || 0;
+                return timeB - timeA; // Descending (newest first)
+            });
+
+            // Assign sequential orders
+            const updates = [];
+            regions.forEach((region, index) => {
+                const newOrder = (regions.length - index) * 1000;
+                console.log(`  📝 Setting order ${newOrder} for: ${region.name} (${region.id})`);
+                updates.push(
+                    updateDoc(region.ref, { order: newOrder })
+                );
+            });
+
+            await Promise.all(updates);
+            console.log('✅ Region ordering fixed successfully!');
+            alert('Region ordering has been fixed! The up/down arrows should now work.');
+        } catch (e) {
+            console.error('❌ Error fixing order:', e);
+            alert('Error: ' + e.message);
+        }
+    };
+
+    window.moveRegion = async (rid, direction) => {
+        console.log(`🔘 moveRegion clicked: ${rid} direction: ${direction}`);
+
+        try {
+            // Get all regions
+            const regionsRef = collection(db, "artifacts", appId, "public", "data", "regions");
+            const snapshot = await getDocs(regionsRef);
+
+            const regions = [];
+            snapshot.forEach(doc => {
+                const data = doc.data();
+                regions.push({
+                    id: doc.id,
+                    order: data.order !== undefined && data.order !== null ? data.order : 0
+                });
+            });
+
+            // Sort by order (ascending)
+            regions.sort((a, b) => a.order - b.order);
+
+            console.log('📋 Current order before move:', regions.map(r => ({ id: r.id, order: r.order })));
+
+            // Find current region index
+            const currentIndex = regions.findIndex(r => r.id === rid);
+            if (currentIndex === -1) {
+                console.error('Region not found:', rid);
+                return;
+            }
+
+            // Calculate new index
+            const newIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
+            if (newIndex < 0 || newIndex >= regions.length) {
+                console.log('Cannot move further in that direction');
+                return;
+            }
+
+            // Swap orders
+            const currentOrder = regions[currentIndex].order;
+            const swapOrder = regions[newIndex].order;
+
+            console.log(`🔄 Swapping: ${regions[currentIndex].id} (${currentOrder}) ↔️ ${regions[newIndex].id} (${swapOrder})`);
+
+            if (currentOrder === swapOrder) {
+                console.error('⚠️ WARNING: Both regions have the same order value! Cannot swap. Run migration first.');
+                alert('Cannot reorder: regions have duplicate order values. Please refresh the page to trigger migration.');
+                return;
+            }
+
+            await updateDoc(doc(db, "artifacts", appId, "public", "data", "regions", rid), { order: swapOrder });
+            await updateDoc(doc(db, "artifacts", appId, "public", "data", "regions", regions[newIndex].id), { order: currentOrder });
+
+            console.log(`✅ Moved ${rid} ${direction}`);
+        } catch (e) {
+            console.error("❌ Error moving region:", e);
+            alert("Error: " + e.message);
         }
     };
 
@@ -300,10 +637,41 @@
 
     window.createRegion = async () => {
         const name = document.getElementById('reg-name').value;
-        const baseTime = parseInt(document.getElementById('reg-time').value);
-        const increment = parseInt(document.getElementById('reg-inc').value);
-        if (!name) return;
-        await addDoc(collection(db, "artifacts", appId, "public", "data", "regions"), { name, baseTime, increment, createdAt: serverTimestamp() });
+        const type = document.getElementById('reg-type').value;
+
+        if (!name) return alert("Region name required.");
+
+        // Get current max order to append new region at the end
+        const regionsRef = collection(db, "artifacts", appId, "public", "data", "regions");
+        const snapshot = await getDocs(regionsRef);
+        let maxOrder = 0;
+        snapshot.forEach(doc => {
+            const order = doc.data().order || 0;
+            if (order > maxOrder) maxOrder = order;
+        });
+
+        const regionData = {
+            name,
+            type,
+            createdAt: serverTimestamp(),
+            order: maxOrder + 1000 // Add 1000 to allow reordering
+        };
+
+        if (type === 'lecture') {
+            // Lecture region
+            const password = document.getElementById('reg-password').value;
+            if (!password) return alert("Lecturer password required for lecture halls.");
+
+            regionData.passwordHash = btoa(password); // Simple hash (use bcrypt in production)
+            regionData.maxTables = parseInt(document.getElementById('reg-max-tables').value) || 3;
+            regionData.maxStudents = parseInt(document.getElementById('reg-max-students').value) || 50;
+        } else {
+            // Game region
+            regionData.baseTime = parseInt(document.getElementById('reg-time').value);
+            regionData.increment = parseInt(document.getElementById('reg-inc').value);
+        }
+
+        await addDoc(collection(db, "artifacts", appId, "public", "data", "regions"), regionData);
         closeModals();
     };
 
@@ -314,7 +682,22 @@
         closeModals();
     };
 
-    window.showAddRegion = () => document.getElementById('region-modal').style.display = 'flex';
+    window.toggleLectureFields = () => {
+        const type = document.getElementById('reg-type').value;
+        const isLecture = type === 'lecture';
+
+        document.getElementById('game-fields').style.display = isLecture ? 'none' : 'block';
+        document.getElementById('lecture-fields').style.display = isLecture ? 'block' : 'none';
+    };
+
+    window.showAddRegion = () => {
+        // Reset form and show game fields by default
+        document.getElementById('reg-type').value = 'game';
+        document.getElementById('game-fields').style.display = 'block';
+        document.getElementById('lecture-fields').style.display = 'none';
+        document.getElementById('region-modal').style.display = 'flex';
+    };
+
     window.showAddTable = () => document.getElementById('table-modal').style.display = 'flex';
     window.closeModals = () => document.querySelectorAll('.modal').forEach(m => m.style.display = 'none');
 </script>
