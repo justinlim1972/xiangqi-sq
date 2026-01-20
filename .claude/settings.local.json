@@ -16,7 +16,17 @@
       "Bash(powershell \"\\(Get-Content ''E:\\\\FireBase-SG\\\\public\\\\game\\\\xq-engine.js''\\).Count\")",
       "Bash(firebase deploy:*)",
       "Bash(powershell \"Get-Content ''E:\\\\FireBase-SG\\\\public\\\\game\\\\xq-app.js'' | Select-String -Pattern ''syncGame\\\\\\(\\\\\\)'' -Context 0,200 | Select-Object -First 1 | ForEach-Object { $_Context.PostContext[0..50] }\")",
-      "Bash(powershell -Command:*)"
+      "Bash(powershell -Command:*)",
+      "Bash(node:*)",
+      "Bash(netstat:*)",
+      "Bash(findstr:*)",
+      "Bash(taskkill:*)",
+      "Bash(firebase serve:*)",
+      "Bash(timeout 3 type:*)",
+      "Bash(./firebase.exe deploy:*)",
+      "Bash(node simple-deploy.js:*)",
+      "Bash(npx firebase deploy:*)",
+      "Bash(copy:*)"
     ]
   }
 }

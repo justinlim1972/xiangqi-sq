@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lecture Hall - SG Xiangqi</title>
+    <style>
+        :root {
+            --primary: #0369a1;
+            --dark: #1e293b;
+            --bg: #f0f9ff;
+            --gold: #f59e0b;
+            --success: #10b981;
+            --lecture-blue: #3b82f6;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: var(--bg);
+            margin: 0;
+            padding: 0;
+            color: #333;
+            overflow: hidden;
+        }
+
+        header {
+            background: linear-gradient(135deg, var(--primary) 0%, #0284c7 100%);
+            color: white;
+            padding: 12px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 4px 12px rgba(3, 105, 161, 0.3);
+        }
+
+        .logo-area { display: flex; align-items: center; gap: 10px; }
+        .lobby-logo { height: 28px; width: auto; filter: brightness(0) invert(1); }
+        header h1 { margin: 0; font-size: 1.1rem; font-weight: 800; }
+
+        .role-badge {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 900;
+            text-transform: uppercase;
+        }
+        .role-badge.lecturer { background: #fef3c7; color: #92400e; }
+        .role-badge.student { background: #dbeafe; color: #1e40af; }
+
+        .btn-exit {
+            background: rgba(239, 68, 68, 0.2);
+            color: white;
+            border: 1px solid rgba(255,255,255,0.3);
+            padding: 8px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 0.85rem;
+        }
+        .btn-exit:hover { background: rgba(239, 68, 68, 0.4); }
+
+        .container {
+            display: flex;
+            height: calc(100vh - 60px);
+            gap: 15px;
+            padding: 15px;
+            box-sizing: border-box;
+        }
+
+        .board-section {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .board-container {
+            background: white;
+            border-radius: 16px;
+            padding: 20px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+            flex: 0 0 auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            min-height: 500px;
+        }
+
+        #chess-board-wrapper {
+            position: relative;
+            width: 90%;
+            max-width: 600px;
+            aspect-ratio: 9 / 10;
+        }
+
+        #board-grid { width: 100%; height: 100%; position: absolute; }
+        #hints-layer, #pieces-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+        #pieces-layer { z-index: 10; pointer-events: auto; }
+        #hints-layer { z-index: 30; pointer-events: none; }
+
+        .piece {
+            position: absolute;
+            width: 9%;
+            height: 9%;
+            transform: translate(-50%, -50%);
+            cursor: pointer;
+            transition: transform 0.1s;
+            z-index: 20;
+        }
+        .piece:hover { transform: translate(-50%, -50%) scale(1.1); }
+        .piece.selected { filter: drop-shadow(0 0 8px #f59e0b); }
+
+        .move-hint {
+            position: absolute;
+            width: 9%;
+            height: 8.2%;
+            transform: translate(-50%, -50%);
+            background: rgba(34, 197, 94, 0.4);
+            border: 2px solid #22c55e;
+            border-radius: 50%;
+            z-index: 15;
+            cursor: pointer;
+            pointer-events: auto;
+        }
+
+        .sidebar {
+            width: 380px;
+            display: flex;
+            flex-direction: column;
+            background: #0a0a0a;
+            flex-shrink: 0;
+        }
+
+        .sidebar-tabs {
+            display: flex;
+            background: #000;
+            border-bottom: 2px solid #222;
+        }
+
+        .sidebar-tab {
+            flex: 1;
+            padding: 15px 10px;
+            background: #0a0a0a;
+            color: #666;
+            border: none;
+            font-weight: 900;
+            font-size: 0.7rem;
+            letter-spacing: 1px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .sidebar-tab.active {
+            background: #1a1a1a;
+            color: var(--gold);
+            border-bottom: 3px solid var(--gold);
+        }
+
+        .sidebar-tab:hover {
+            background: #151515;
+        }
+
+        .tab-content {
+            display: none;
+            flex: 1;
+            overflow-y: auto;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .panel {
+            background: #080808;
+            border: 1px solid #222;
+            border-radius: 10px;
+            padding: 15px;
+            margin: 15px;
+        }
+
+        .panel h3 {
+            margin: 0 0 12px 0;
+            font-size: 0.65rem;
+            color: var(--gold);
+            text-transform: uppercase;
+            font-weight: 800;
+            letter-spacing: 1px;
+            border-bottom: 1px solid #222;
+            padding-bottom: 8px;
+        }
+
+        .video-placeholder {
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            border-radius: 12px;
+            height: 180px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #94a3b8;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+
+        .controls {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .btn {
+            border: none;
+            padding: 10px 15px;
+            border-radius: 8px;
+            font-weight: bold;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: 0.2s;
+        }
+
+        .btn-primary { background: var(--lecture-blue); color: white; }
+        .btn-primary:hover { background: #2563eb; }
+
+        .btn-secondary { background: #f1f5f9; color: #64748b; }
+        .btn-secondary:hover { background: #e2e8f0; }
+
+        .btn-danger { background: #fee2e2; color: #991b1b; }
+        .btn-danger:hover { background: #fecaca; }
+
+        .students-list {
+            max-height: 300px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .student-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px;
+            background: #1a1a1a;
+            border-radius: 8px;
+            font-size: 0.8rem;
+            color: #ccc;
+        }
+
+        .student-avatar {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: #333;
+            overflow: hidden;
+        }
+
+        .student-avatar img { width: 100%; height: 100%; object-fit: cover; }
+
+        .chat-message {
+            margin-bottom: 8px;
+            font-size: 0.8rem;
+            color: #ccc;
+        }
+
+        .chat-message .sender {
+            font-weight: bold;
+            color: var(--gold);
+        }
+
+        .move-item {
+            padding: 8px 10px;
+            cursor: pointer;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            transition: background 0.2s;
+            color: #ccc;
+            margin-bottom: 4px;
+        }
+
+        .move-item:hover {
+            background: #1a1a1a;
+        }
+
+        .move-item.active {
+            background: #2a2a2a;
+            color: var(--gold);
+            font-weight: bold;
+        }
+
+        /* Password Modal */
+        .modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+        }
+
+        .modal-content {
+            background: white;
+            padding: 30px;
+            border-radius: 16px;
+            width: 400px;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.3);
+        }
+
+        .modal h2 {
+            margin: 0 0 20px 0;
+            color: var(--primary);
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 0.85rem;
+            font-weight: bold;
+            color: #64748b;
+            margin-bottom: 5px;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            font-size: 1rem;
+            box-sizing: border-box;
+        }
+
+        .announcement-banner {
+            background: linear-gradient(135deg, #dbeafe 0%, #eff6ff 100%);
+            border: 2px solid #93c5fd;
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 15px;
+        }
+
+        .announcement-banner h4 {
+            margin: 0 0 8px 0;
+            color: #1e40af;
+            font-size: 0.85rem;
+        }
+
+        .announcement-banner p {
+            margin: 0;
+            font-size: 0.8rem;
+            color: #1e3a8a;
+            line-height: 1.4;
+        }
+    </style>
+</head>
+<body>
+
+<div id="password-modal" class="modal">
+    <div class="modal-content">
+        <h2>🎓 Join Lecture</h2>
+        <div class="form-group">
+            <label>Enter Lecturer Password (leave blank to join as student)</label>
+            <input type="password" id="password-input" placeholder="Password for lecturer access">
+        </div>
+        <div style="display: flex; gap: 10px;">
+            <button class="btn btn-primary" style="flex: 1;" onclick="joinLecture()">Join</button>
+            <button class="btn btn-secondary" onclick="exitLecture()">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<header>
+    <div class="logo-area">
+        <img src="/pictures/Singapore.png" alt="SG Xiangqi" class="lobby-logo">
+        <h1 id="table-title">🎓 Lecture Hall</h1>
+    </div>
+    <div style="display: flex; align-items: center; gap: 15px;">
+        <span id="role-badge" class="role-badge student">Student</span>
+        <span id="user-name" style="font-size: 0.9rem; font-weight: 600;"></span>
+        <button class="btn-exit" onclick="exitLecture()">Exit to Lobby</button>
+    </div>
+</header>
+
+<div class="container">
+    <!-- BOARD SECTION -->
+    <div class="board-section">
+        <div id="announcement-container"></div>
+
+        <div class="board-container">
+            <div id="chess-board-wrapper">
+                <svg id="board-grid" viewBox="0 0 100 110" preserveAspectRatio="xMidYMid meet"></svg>
+                <div id="hints-layer"></div>
+                <div id="pieces-layer"></div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- RIGHT SIDEBAR -->
+    <div class="sidebar">
+        <!-- Tab Navigation -->
+        <div class="sidebar-tabs">
+            <button class="sidebar-tab active" id="tab-btn-lecture" onclick="switchTab('lecture')">LECTURE</button>
+            <button class="sidebar-tab" id="tab-btn-moves" onclick="switchTab('moves')">MOVES</button>
+            <button class="sidebar-tab" id="tab-btn-chat" onclick="switchTab('chat')">CHAT</button>
+        </div>
+
+        <!-- LECTURE TAB CONTENT -->
+        <div id="tab-content-lecture" class="tab-content active">
+            <div style="padding: 15px;">
+                <!-- Lecturer Video -->
+                <div style="background: #0a0a0a; padding: 12px; border-radius: 10px; margin-bottom: 15px; border: 1px solid #222;">
+                    <div style="font-size: 0.65rem; color: var(--gold); text-transform: uppercase; font-weight: 800; letter-spacing: 1px; margin-bottom: 8px;">📹 Lecturer Video</div>
+                    <div class="video-placeholder">
+                        📹 Video feature coming soon
+                    </div>
+                </div>
+
+                <!-- Lecture Controls (Lecturer only) -->
+                <div id="lecturer-controls" style="display: none; background: #0a0a0a; padding: 12px; border-radius: 10px; margin-bottom: 15px; border: 1px solid #222;">
+                    <div style="font-size: 0.65rem; color: var(--gold); text-transform: uppercase; font-weight: 800; letter-spacing: 1px; margin-bottom: 10px;">🎮 Lecture Controls</div>
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                        <button class="btn btn-primary" onclick="resetBoard()">♻️ Reset Board</button>
+                        <button class="btn btn-secondary" onclick="undoMove()">↩️ Undo Last Move</button>
+                    </div>
+                </div>
+
+                <!-- Students -->
+                <div style="background: #0a0a0a; padding: 12px; border-radius: 10px; border: 1px solid #222;">
+                    <div style="font-size: 0.65rem; color: var(--gold); text-transform: uppercase; font-weight: 800; letter-spacing: 1px; margin-bottom: 12px;">👥 Students (<span id="student-count">0</span>)</div>
+                    <div id="students-list" class="students-list"></div>
+                </div>
+            </div>
+        </div>
+        <!-- END LECTURE TAB -->
+
+        <!-- MOVES TAB CONTENT -->
+        <div id="tab-content-moves" class="tab-content">
+            <div style="padding: 15px;">
+                <!-- Navigation Controls -->
+                <div style="background: #0a0a0a; padding: 12px; border-radius: 10px; margin-bottom: 15px; border: 1px solid #222;">
+                    <div style="font-size: 0.65rem; color: var(--gold); text-transform: uppercase; font-weight: 800; letter-spacing: 1px; margin-bottom: 10px;">Navigation</div>
+                    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;">
+                        <button class="btn btn-secondary" onclick="firstStep()" title="First Move" style="padding: 8px; font-size: 0.9rem;">⏮️</button>
+                        <button class="btn btn-secondary" onclick="previousStep()" title="Previous" style="padding: 8px; font-size: 0.9rem;">◀️</button>
+                        <button class="btn btn-secondary" onclick="nextStep()" title="Next" style="padding: 8px; font-size: 0.9rem;">▶️</button>
+                        <button class="btn btn-secondary" onclick="lastStep()" title="Last Move" style="padding: 8px; font-size: 0.9rem;">⏭️</button>
+                    </div>
+                </div>
+
+                <!-- Move History -->
+                <div style="background: #0a0a0a; padding: 12px; border-radius: 10px; border: 1px solid #222; max-height: calc(100vh - 280px); overflow-y: auto;">
+                    <div style="font-size: 0.65rem; color: var(--gold); text-transform: uppercase; font-weight: 800; letter-spacing: 1px; margin-bottom: 12px;">Move History</div>
+                    <div id="move-history">
+                        <div style="text-align: center; color: #666; padding: 40px 20px; font-size: 0.8rem;">No moves yet</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- END MOVES TAB -->
+
+        <!-- CHAT TAB CONTENT -->
+        <div id="tab-content-chat" class="tab-content">
+            <div class="panel" style="height: calc(100vh - 180px); display: flex; flex-direction: column; margin: 0; border-radius: 0;">
+                <h3>💬 Chat</h3>
+                <div id="chat-messages" class="chat-messages" style="flex: 1; overflow-y: auto; border: 1px solid #222; border-radius: 8px; padding: 10px; margin-bottom: 10px; background: #000;">
+                    <p style="color: #666; text-align: center; font-size: 0.75rem;">Welcome to the lecture!</p>
+                </div>
+                <div class="chat-input" style="display: flex; gap: 8px;">
+                    <input type="text" id="chat-input" placeholder="Type a message..." maxlength="200" onkeypress="if(event.key==='Enter') sendMessage()" style="flex: 1; padding: 10px; border: 1px solid #222; border-radius: 8px; background: #0a0a0a; color: #eee; font-size: 0.85rem;">
+                    <button onclick="sendMessage()" style="padding: 10px 20px; background: var(--lecture-blue); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 0.85rem;">Send</button>
+                </div>
+            </div>
+        </div>
+        <!-- END CHAT TAB -->
+    </div>
+</div>
+
+<script>
+// Tab switching function
+function switchTab(tabName) {
+    // Hide all tabs
+    document.querySelectorAll('.tab-content').forEach(tab => {
+        tab.classList.remove('active');
+    });
+    document.querySelectorAll('.sidebar-tab').forEach(btn => {
+        btn.classList.remove('active');
+    });
+
+    // Show selected tab
+    document.getElementById(`tab-content-${tabName}`).classList.add('active');
+    document.getElementById(`tab-btn-${tabName}`).classList.add('active');
+}
+</script>
+<script type="module" src="lecture-app.js?v=15"></script>
+</body>
+</html>

@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SG Xiangqi - General's Arena</title>
+    <style>
+        :root {
+            --gold: #f1c40f; --primary: #cd3333; --dark: #05080c;
+            --panel-bg: #111; --hint: rgba(34, 197, 94, 0.4);
+            --board-line: #5d2e0c;
+        }
+        body { 
+            margin: 0; background: var(--dark); color: #eee; 
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; 
+            display: flex; height: 100vh; overflow: hidden; 
+        }
+        
+        /* THE STAGE */
+        main { 
+            flex-grow: 1; position: relative; display: flex; 
+            align-items: center; justify-content: center; background: #000; 
+            overflow: hidden;
+        }
+
+        /* ATMOSPHERIC BACKGROUND */
+        #environment-bg {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background-image: url('https://images.unsplash.com/photo-1508804185872-d7badad00f7d?q=80&w=1200');
+            background-size: cover; background-position: center;
+            filter: brightness(1.0) blur(2px); z-index: 1;
+        }
+
+        .board-container {
+            position: relative; z-index: 5; 
+            width: 85vh; max-width: 95vw;
+            aspect-ratio: 10/11; border: 12px solid #2a1a10;
+            background: #dcb35c; 
+            box-shadow: 0 40px 100px rgba(0,0,0,0.9), 0 0 20px rgba(241, 196, 15, 0.2);
+            border-radius: 4px;
+        }
+
+        /* SVG & LAYERS */
+        #board-svg { width: 100%; height: 100%; display: block; }
+        #hints-layer, #pieces-layer {
+            position: absolute; top: 0; left: 0;
+            width: 100%; height: 100%; pointer-events: none;
+        }
+        #pieces-layer { z-index: 10; pointer-events: auto; }
+        #hints-layer { z-index: 30; pointer-events: none; }
+
+        /* Game Over Image Overlay */
+        #game-over-overlay {
+            position: absolute; top: 0; left: 0;
+            width: 100%; height: 100%;
+            z-index: 40; pointer-events: none;
+            background: rgba(0, 0, 0, 0.7);
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.5s ease, visibility 0.5s ease;
+        }
+        #game-over-overlay.show {
+            opacity: 1;
+            visibility: visible;
+        }
+        #game-over-overlay.show img {
+            animation: zoomIn 0.8s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        #game-over-overlay img {
+            width: 100%; height: 100%; object-fit: contain;
+        }
+        @keyframes zoomIn {
+            from { transform: scale(0.5); opacity: 0; }
+            to { transform: scale(1); opacity: 1; }
+        }
+
+
+        /* PIECE STYLING */
+        .piece { 
+            position: absolute; width: 9.1%; height: 8.2%; 
+            transform: translate(-50%, -50%); 
+            transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); 
+            z-index: 20; cursor: pointer; 
+        }
+        
+        .piece-selected {
+            filter: drop-shadow(0 0 15px #f1c40f) brightness(1.3);
+            transform: translate(-50%, -50%) scale(1.1);
+            z-index: 25 !important;
+        }
+        
+        .opponent-selected {
+            filter: drop-shadow(0 0 15px #cd3333) brightness(1.2);
+            animation: opponentPulse 1s ease-in-out infinite;
+        }
+        
+        @keyframes opponentPulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+        
+        @keyframes timerPulse {
+            0%, 100% { 
+                transform: scale(1); 
+                opacity: 1;
+            }
+            50% { 
+                transform: scale(1.1); 
+                opacity: 0.8;
+            }
+        }
+        
+        /* MOVE HINTS */
+        .move-hint {
+            position: absolute;
+            width: 9%;
+            height: 8.2%;
+            transform: translate(-50%, -50%);
+            background: var(--hint);
+            border: 2px solid #22c55e;
+            border-radius: 50%;
+            z-index: 15;
+            cursor: pointer;
+            pointer-events: auto;
+        }
+
+        /* SIDEBAR INTERFACE */
+        #sidebar { 
+            width: 380px; background: var(--panel-bg); 
+            border-left: 2px solid #222; display: flex; 
+            flex-direction: column; z-index: 100; flex-shrink: 0;
+        }
+        
+        /* REWARD BANNER */
+        .reward-banner { 
+            background: #000; padding: 15px; 
+            border-bottom: 2px solid var(--gold); text-align: center; 
+        }
+        .reward-banner span { 
+            font-size: 0.65rem; color: var(--gold); 
+            text-transform: uppercase; font-weight: 800; 
+            letter-spacing: 2px; display: block; margin-bottom: 5px; 
+        }
+        .reward-tile { 
+            font-size: 2.8rem; filter: drop-shadow(0 0 10px rgba(241, 196, 15, 0.5)); 
+        }
+
+        .p-block { 
+            padding: 15px; background: #080808; 
+            display: flex; flex-direction: column; gap: 8px; 
+            border-bottom: 1px solid #222; 
+        }
+        .p-card {
+            background: #1a1a1a; padding: 10px; border-radius: 12px;
+            display: flex; align-items: center; gap: 12px; border: 3px solid #333;
+            transition: all 0.3s ease;
+        }
+        .p-card:hover {
+            border-color: var(--gold);
+            background: #252525;
+            box-shadow: 0 0 10px rgba(241, 196, 15, 0.2);
+        }
+        .p-card.clickable { cursor: pointer; }
+        .p-card.not-clickable { cursor: not-allowed; opacity: 0.6; }
+        .p-card.not-clickable:hover { border-color: #333; background: #1a1a1a; box-shadow: none; }
+        .p-card.occupied-red {
+            border-color: #cd3333;
+            border-width: 4px;
+            box-shadow: 0 0 15px rgba(205, 51, 51, 0.4);
+        }
+        .p-card.occupied-black {
+            border-color: #1e3a8a;
+            border-width: 4px;
+            box-shadow: 0 0 15px rgba(30, 58, 138, 0.4);
+        }
+        .p-card.empty-slot {
+            border-color: #333;
+            border-width: 3px;
+        }
+        .p-avatar { 
+            width: 42px; height: 42px; border-radius: 50%; 
+            overflow: hidden; border: 2px solid #444; 
+        }
+        .p-avatar img { width: 100%; height: 100%; object-fit: cover; }
+
+        /* PRESENCE LIST - SCROLLABLE */
+        .presence-header { 
+            background: #000; padding: 10px 15px; border-bottom: 1px solid #222; 
+            display: flex; justify-content: space-between; align-items: center; 
+        }
+        .presence-header span { 
+            font-size: 0.6rem; color: var(--gold); 
+            font-weight: 900; letter-spacing: 2px; 
+        }
+        
+        #presence-list {
+            max-height: 200px; overflow-y: auto;
+            background: #050505; border-bottom: 1px solid #222;
+        }
+        .presence-item { 
+            padding: 8px 12px; font-size: 0.65rem; display: flex; flex-direction: column; 
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            background: white; color: black; /* DEFAULT OBSERVER */
+            transition: 0.3s;
+        }
+        .presence-item strong { display: block; font-weight: 900; text-transform: uppercase; }
+        .presence-item em { font-size: 0.55rem; opacity: 0.6; font-style: normal; display: block; }
+
+        .p-red { background: var(--primary) !important; color: white !important; }
+        .p-black { background: #000 !important; color: white !important; border-bottom-color: #333 !important; }
+
+        /* BUTTONS */
+        .btn-action { 
+            width: 100%; padding: 12px; border-radius: 8px; border: none; 
+            font-weight: 900; cursor: pointer; font-size: 0.8rem; 
+            text-transform: uppercase; transition: 0.2s;
+        }
+        .btn-red { background: var(--primary); color: white; }
+        .btn-blue { background: #3498db; color: white; }
+        .btn-green { background: #27ae60; color: white; margin-top: 10px; }
+        .btn-action:disabled { opacity: 0.3; cursor: not-allowed; }
+
+        #chat-log { 
+            flex-grow: 1; overflow-y: auto; padding: 15px; 
+            background: #050505; font-size: 0.8rem; 
+        }
+        .chat-msg { 
+            margin-bottom: 8px; padding: 8px 12px; 
+            background: #111; border-radius: 8px; 
+            border-left: 3px solid var(--gold); 
+        }
+        
+        .chat-input { padding: 12px; background: #000; border-top: 1px solid #222; }
+        .chat-input input { 
+            width: 100%; background: #111; border: 1px solid #333; 
+            color: white; padding: 12px; border-radius: 8px; 
+            outline: none; box-sizing: border-box; 
+        }
+
+        .bottom-nav { padding: 12px; background: #050505; border-top: 1px solid #222; }
+
+        /* SIDEBAR TABS */
+        .sidebar-tabs {
+            display: flex; gap: 0; background: #000; border-bottom: 2px solid #222;
+        }
+        .sidebar-tab {
+            flex: 1; padding: 12px 8px; background: #0a0a0a; border: none;
+            color: #555; font-weight: 900; font-size: 0.7rem; letter-spacing: 1px;
+            cursor: pointer; transition: all 0.3s; border-bottom: 3px solid transparent;
+        }
+        .sidebar-tab:hover {
+            background: #111; color: #888;
+        }
+        .sidebar-tab.active {
+            background: #000; color: var(--gold); border-bottom-color: var(--gold);
+        }
+
+        /* TAB CONTENT */
+        .tab-content {
+            display: none; flex: 1; overflow-y: auto;
+        }
+        .tab-content.active {
+            display: flex; flex-direction: column;
+        }
+
+        /* SETTING TOGGLES */
+        .setting-toggle {
+            flex: 1; padding: 12px 20px; background: #1a1a1a; border: 2px solid #333;
+            color: #666; font-weight: 900; font-size: 0.85rem; border-radius: 8px;
+            cursor: pointer; transition: all 0.3s;
+        }
+        .setting-toggle:hover {
+            background: #222; border-color: #444;
+        }
+        .setting-toggle.active {
+            background: var(--primary); border-color: var(--primary);
+            color: white; box-shadow: 0 0 15px rgba(205, 51, 51, 0.4);
+        }
+
+        #loader { 
+            position: fixed; top:0; left:0; width:100%; height:100%; 
+            background: #05080c; z-index: 9999; display: flex; 
+            flex-direction: column; align-items: center; justify-content: center; 
+        }
+        .spin {
+            width: 40px; height: 40px; border: 4px solid #111;
+            border-top-color: var(--gold); border-radius: 50%;
+            animation: s 1s linear infinite;
+        }
+        @keyframes s { to { transform: rotate(360deg); } }
+        @keyframes pulse {
+            0%, 100% { box-shadow: 0 0 15px rgba(241, 196, 15, 0.4); }
+            50% { box-shadow: 0 0 30px rgba(241, 196, 15, 0.8); }
+        }
+        @keyframes stress-pulse {
+            0%, 100% {
+                box-shadow: 0 0 15px rgba(255, 0, 0, 0.6);
+                border-color: #ff0000;
+                background: #2a0000;
+            }
+            50% {
+                box-shadow: 0 0 35px rgba(255, 0, 0, 1);
+                border-color: #ff3333;
+                background: #3a0000;
+            }
+        }
+        .p-card.time-stress {
+            animation: stress-pulse 1s infinite;
+        }
+
+        /* BATTLE START SPLASH SCREEN */
+        #battle-splash {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(0, 0, 0, 0.95);
+            z-index: 9999;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            animation: fadeIn 0.5s ease-in;
+        }
+
+        #battle-splash.active {
+            display: flex;
+        }
+
+        .battle-splash-content {
+            position: relative;
+            width: 90vmin;
+            max-width: 800px;
+            animation: zoomIn 0.8s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+
+        .battle-splash-image {
+            width: 100%;
+            height: auto;
+            border-radius: 20px;
+            box-shadow: 0 0 80px rgba(255, 68, 68, 0.8),
+                        0 0 120px rgba(241, 196, 15, 0.6),
+                        0 20px 60px rgba(0, 0, 0, 0.9);
+            filter: brightness(1.1) contrast(1.15);
+        }
+
+        .battle-splash-glow {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 120%;
+            height: 120%;
+            background: radial-gradient(circle, rgba(255, 68, 68, 0.4) 0%, transparent 70%);
+            animation: pulse-glow 2s ease-in-out infinite;
+            pointer-events: none;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        @keyframes zoomIn {
+            0% {
+                transform: scale(0.3);
+                opacity: 0;
+            }
+            50% {
+                transform: scale(1.05);
+            }
+            100% {
+                transform: scale(1);
+                opacity: 1;
+            }
+        }
+
+        @keyframes pulse-glow {
+            0%, 100% {
+                opacity: 0.6;
+                transform: translate(-50%, -50%) scale(1);
+            }
+            50% {
+                opacity: 1;
+                transform: translate(-50%, -50%) scale(1.1);
+            }
+        }
+    </style>
+</head>
+<body>
+
+<div id="loader">
+    <div class="spin"></div>
+    <p style="margin-top:20px; color:var(--gold); font-weight:bold; letter-spacing: 2px;">SYNCING ARENA...</p>
+</div>
+
+<!-- BATTLE START SPLASH SCREEN -->
+<div id="battle-splash">
+    <div class="battle-splash-content">
+        <div class="battle-splash-glow"></div>
+        <img src="/pictures/Start_Game.png" alt="Battle Start" class="battle-splash-image">
+    </div>
+</div>
+
+<!-- TEST: UNSEAT button moved to top to test z-index blocking 
+<div style="position: fixed; top: 10px; right: 10px; z-index: 99999;">
+    <button id="btn-unseat-test" class="btn-action btn-red" style="display:none; padding: 15px 30px; font-size: 18px;" onclick="window.app.unseat()">🚪 UNSEAT (TEST)</button>
+</div>-->
+
+<main>
+    <div id="environment-bg"></div>
+    <div class="board-container">
+        <!-- HARDCODED GRID: Guaranteed visual board even if JS Handshake is slow -->
+        <svg id="board-svg" viewBox="0 0 100 110" preserveAspectRatio="xMidYMid meet">
+            <!-- Horizontal Lines -->
+            <g stroke="var(--board-line)" stroke-width="0.4">
+                <line x1="10" y1="10" x2="90" y2="10" />
+                <line x1="10" y1="20" x2="90" y2="20" />
+                <line x1="10" y1="30" x2="90" y2="30" />
+                <line x1="10" y1="40" x2="90" y2="40" />
+                <line x1="10" y1="50" x2="90" y2="50" />
+                <line x1="10" y1="60" x2="90" y2="60" />
+                <line x1="10" y1="70" x2="90" y2="70" />
+                <line x1="10" y1="80" x2="90" y2="80" />
+                <line x1="10" y1="90" x2="90" y2="90" />
+                <line x1="10" y1="100" x2="90" y2="100" />
+            </g>
+            <!-- Vertical Lines (Split by River) -->
+            <g stroke="var(--board-line)" stroke-width="0.4">
+                <line x1="10" y1="10" x2="10" y2="100" />
+                <line x1="20" y1="10" x2="20" y2="50" /> <line x1="20" y1="60" x2="20" y2="100" />
+                <line x1="30" y1="10" x2="30" y2="50" /> <line x1="30" y1="60" x2="30" y2="100" />
+                <line x1="40" y1="10" x2="40" y2="50" /> <line x1="40" y1="60" x2="40" y2="100" />
+                <line x1="50" y1="10" x2="50" y2="50" /> <line x1="50" y1="60" x2="50" y2="100" />
+                <line x1="60" y1="10" x2="60" y2="50" /> <line x1="60" y1="60" x2="60" y2="100" />
+                <line x1="70" y1="10" x2="70" y2="50" /> <line x1="70" y1="60" x2="70" y2="100" />
+                <line x1="80" y1="10" x2="80" y2="50" /> <line x1="80" y1="60" x2="80" y2="100" />
+                <line x1="90" y1="10" x2="90" y2="100" />
+            </g>
+            <!-- Palaces -->
+            <g stroke="var(--board-line)" stroke-width="0.4">
+                <line x1="40" y1="10" x2="60" y2="30" />
+                <line x1="60" y1="10" x2="40" y2="30" />
+                <line x1="40" y1="80" x2="60" y2="100" />
+                <line x1="60" y1="80" x2="40" y2="100" />
+            </g>
+            <!-- River Text -->
+            <g font-family="serif" font-weight="900" font-size="4.5" fill="var(--board-line)" opacity="0.7">
+                <text x="30" y="56.5" text-anchor="middle">楚 河</text>
+                <text x="70" y="56.5" text-anchor="middle">漢 界</text>
+            </g>
+            <!-- Border -->
+            <rect x="10" y="10" width="80" height="90" fill="none" stroke="var(--board-line)" stroke-width="1.2" />
+            
+            <!-- Coordinates -->
+            <g font-size="3.5" fill="var(--board-line)" font-weight="bold" text-anchor="middle">
+                <text x="10" y="6.5">1</text><text x="20" y="6.5">2</text><text x="30" y="6.5">3</text>
+                <text x="40" y="6.5">4</text><text x="50" y="6.5">5</text><text x="60" y="6.5">6</text>
+                <text x="70" y="6.5">7</text><text x="80" y="6.5">8</text><text x="90" y="6.5">9</text>
+                
+                <text x="10" y="106.8">九</text><text x="20" y="106.8">八</text><text x="30" y="106.8">七</text>
+                <text x="40" y="106.8">六</text><text x="50" y="106.8">五</text><text x="60" y="106.8">四</text>
+                <text x="70" y="106.8">三</text><text x="80" y="106.8">二</text><text x="90" y="106.8">一</text>
+            </g>
+        </svg>
+        <div id="hints-layer"></div>
+        <div id="pieces-layer"></div>
+
+        <div id="game-over-overlay">
+            <img id="game-over-image" src="" alt="Game Over">
+        </div>
+    </div>
+</main>
+
+<div id="sidebar">
+    <!-- Tab Navigation -->
+    <div class="sidebar-tabs">
+        <button class="sidebar-tab active" id="tab-btn-game" onclick="app.switchTab('game')">GAME</button>
+        <button class="sidebar-tab" id="tab-btn-moves" onclick="app.switchTab('moves')">MOVES</button>
+        <button class="sidebar-tab" id="tab-btn-settings" onclick="app.switchTab('settings')">SETTINGS</button>
+    </div>
+
+    <!-- GAME TAB CONTENT -->
+    <div id="tab-content-game" class="tab-content active">
+    <!-- Players Info -->
+    <div class="p-block">
+        <div id="player-card-black" class="p-card" style="flex-direction: column; align-items: stretch; gap: 8px; cursor: pointer; transition: 0.2s;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div class="p-avatar"><img src="/lobby/1.JPG" id="avatar-black"></div>
+                <div style="flex-grow: 1; display: flex; align-items: center; gap: 8px;">
+                    <span id="name-black">Empty Slot</span>
+                    <span id="owner-badge-black" style="display: none; font-size: 1.2rem; filter: drop-shadow(0 0 8px rgba(241, 196, 15, 0.8));" title="Table Owner">👑</span>
+                </div>
+            </div>
+            <div id="black-timer" style="
+                display: none;
+                font-family: 'Courier New', monospace; 
+                font-weight: 900; 
+                font-size: 2.2rem; 
+                color: #f1c40f; 
+                text-align: center;
+                background: rgba(0,0,0,0.5);
+                padding: 8px;
+                border-radius: 8px;
+                letter-spacing: 3px;
+                text-shadow: 0 0 20px rgba(241, 196, 15, 0.8);
+            ">00:15:00</div>
+        </div>
+        <div id="player-card-red" class="p-card" style="flex-direction: column; align-items: stretch; gap: 8px; cursor: pointer; transition: 0.2s;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div class="p-avatar"><img src="/lobby/1.JPG" id="avatar-red"></div>
+                <div style="flex-grow: 1; display: flex; align-items: center; gap: 8px;">
+                    <span id="name-red">Empty Slot</span>
+                    <span id="owner-badge-red" style="display: none; font-size: 1.2rem; filter: drop-shadow(0 0 8px rgba(241, 196, 15, 0.8));" title="Table Owner">👑</span>
+                </div>
+            </div>
+            <div id="red-timer" style="
+                display: none;
+                font-family: 'Courier New', monospace; 
+                font-weight: 900; 
+                font-size: 2.2rem; 
+                color: #f1c40f; 
+                text-align: center;
+                background: rgba(0,0,0,0.5);
+                padding: 8px;
+                border-radius: 8px;
+                letter-spacing: 3px;
+                text-shadow: 0 0 20px rgba(241, 196, 15, 0.8);
+            ">00:15:00</div>
+        </div>
+        
+        <!-- Action Menu (appears when clicking player slots) -->
+        <div id="action-menu" style="display: none; margin-top: 10px; background: #0a0a0a; border: 2px solid var(--gold); border-radius: 12px; padding: 10px; position: relative; z-index: 100;">
+            <div id="action-menu-title" style="color: var(--gold); font-size: 0.7rem; font-weight: 800; text-align: center; margin-bottom: 8px; letter-spacing: 1px;"></div>
+            <div id="action-menu-buttons" style="display: flex; flex-direction: column; gap: 6px;"></div>
+        </div>
+
+        <!-- Draw Offer Modal (restricted to sidebar area) -->
+        <div id="draw-offer-modal" style="display: none; margin-top: 10px; background: #0a0a0a; border: 3px solid var(--gold); border-radius: 15px; padding: 20px; animation: pulse 2s infinite;">
+            <div style="text-align: center;">
+                <div style="font-size: 2.5rem; margin-bottom: 8px;">🤝</div>
+                <h2 id="draw-offer-title" style="color: var(--gold); font-size: 1.1rem; margin-bottom: 8px; font-weight: 900; letter-spacing: 1px;">DRAW OFFER</h2>
+                <p id="draw-offer-message" style="color: #eee; font-size: 0.85rem; margin-bottom: 12px; line-height: 1.4;">Your opponent offers a draw</p>
+                <div id="draw-offer-countdown" style="font-size: 3rem; font-weight: 900; color: var(--gold); font-family: 'Courier New', monospace; margin-bottom: 15px; text-shadow: 0 0 20px rgba(241, 196, 15, 0.6);">10</div>
+                <div style="display: flex; gap: 10px; justify-content: center;">
+                    <button id="btn-accept-draw-modal" class="btn-action" style="background: #27ae60; color: white; padding: 12px 20px; font-size: 0.9rem; border-radius: 10px; border: none; cursor: pointer; font-weight: 900; flex: 1;">✅ ACCEPT</button>
+                    <button id="btn-reject-draw-modal" class="btn-action" style="background: #cd3333; color: white; padding: 12px 20px; font-size: 0.9rem; border-radius: 10px; border: none; cursor: pointer; font-weight: 900; flex: 1;">❌ REJECT</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Battle Request Modal (restricted to sidebar area) -->
+        <div id="battle-request-modal" style="display: none; margin-top: 10px; background: #0a0a0a; border: 3px solid var(--gold); border-radius: 15px; padding: 20px; animation: pulse 2s infinite;">
+            <div style="text-align: center;">
+                <div style="font-size: 2.5rem; margin-bottom: 8px;">⚔️</div>
+                <h2 style="color: var(--gold); font-size: 1.1rem; margin-bottom: 8px; font-weight: 900; letter-spacing: 1px;">BATTLE REQUEST</h2>
+                <p id="battle-request-message" style="color: #eee; font-size: 0.85rem; margin-bottom: 12px; line-height: 1.4;">Player requests a battle</p>
+                <div id="battle-request-countdown" style="font-size: 3rem; font-weight: 900; color: var(--gold); font-family: 'Courier New', monospace; margin-bottom: 15px; text-shadow: 0 0 20px rgba(241, 196, 15, 0.6);">10</div>
+                <div style="display: flex; gap: 10px; justify-content: center;">
+                    <button id="btn-accept-battle-modal" class="btn-action" style="background: #27ae60; color: white; padding: 12px 20px; font-size: 0.9rem; border-radius: 10px; border: none; cursor: pointer; font-weight: 900; flex: 1;">✅ ACCEPT</button>
+                    <button id="btn-reject-battle-modal" class="btn-action" style="background: #cd3333; color: white; padding: 12px 20px; font-size: 0.9rem; border-radius: 10px; border: none; cursor: pointer; font-weight: 900; flex: 1;">❌ REJECT</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Battle Request Rejected Notification -->
+        <div id="battle-rejected-notification" style="display: none; margin-top: 10px; background: #0a0a0a; border: 3px solid #cd3333; border-radius: 15px; padding: 20px;">
+            <div style="text-align: center;">
+                <div style="font-size: 2.5rem; margin-bottom: 8px;">❌</div>
+                <h2 style="color: #cd3333; font-size: 1.1rem; margin-bottom: 8px; font-weight: 900; letter-spacing: 1px;">REQUEST DECLINED</h2>
+                <p id="battle-rejected-message" style="color: #eee; font-size: 0.85rem; margin-bottom: 12px; line-height: 1.4;">Your battle request was declined</p>
+                <div id="battle-rejected-countdown" style="font-size: 2rem; font-weight: 900; color: #666; font-family: 'Courier New', monospace; text-shadow: 0 0 10px rgba(0, 0, 0, 0.6);">5</div>
+            </div>
+        </div>
+
+        <!-- Move Animation Overlay (appears for captures, checks, checkmate) -->
+        <div id="move-animation" style="display: none; margin-top: 10px; background: #0a0a0a; border: 3px solid var(--gold); border-radius: 15px; padding: 20px;">
+            <div style="text-align: center;">
+                <div id="move-animation-icon" style="font-size: 2.5rem; margin-bottom: 8px;">⚔️</div>
+                <h2 id="move-animation-chinese" style="color: var(--gold); font-size: 2.5rem; margin-bottom: 8px; font-weight: 900; letter-spacing: 3px; text-shadow: 0 0 20px rgba(241, 196, 15, 0.8);">吃</h2>
+                <p id="move-animation-english" style="color: #eee; font-size: 1rem; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;">CAPTURE</p>
+            </div>
+        </div>
+
+        <!-- Emergency Reset (only shows if stuck) -->
+        <button id="btn-reset-match" class="btn-action" style="display:none; background:#666; margin-top: 5px;">⚠️ RESET MATCH</button>
+    </div>
+    
+    <!-- Room Presence -->
+    <div class="presence-header">
+        <span>ROOM PRESENCE</span>
+        <span id="presence-count">SYNCING...</span>
+    </div>
+    <div id="presence-list">
+        <!-- Populated dynamically with Highlighting (Red/Black/White) -->
+    </div>
+
+    <!-- Communication -->
+    <div id="chat-log"></div>
+    <div class="chat-input">
+        <input type="text" id="chat-msg" placeholder="Broadcast to room..." onkeydown="if(event.key==='Enter') app.sendChat()">
+    </div>
+    </div>
+    <!-- END GAME TAB -->
+
+    <!-- MOVES TAB CONTENT -->
+    <div id="tab-content-moves" class="tab-content" style="display: none;">
+        <div style="padding: 15px;">
+            <!-- FEN Display -->
+            <div style="background: #0a0a0a; padding: 12px; border-radius: 10px; margin-bottom: 15px; border: 1px solid #222;">
+                <div style="font-size: 0.65rem; color: var(--gold); text-transform: uppercase; font-weight: 800; letter-spacing: 1px; margin-bottom: 8px;">CURRENT POSITION (FEN)</div>
+                <div id="fen-display" style="font-family: 'Courier New', monospace; font-size: 0.7rem; color: #eee; word-break: break-all; line-height: 1.4;">rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1</div>
+                <div style="margin-top: 8px; display: flex; gap: 8px;">
+                    <button class="btn-action" onclick="app.copyFEN()" style="flex: 1; background: #2c3e50; padding: 8px; font-size: 0.75rem;">📋 COPY FEN</button>
+                    <button class="btn-action" onclick="app.exportPGN()" style="flex: 1; background: var(--primary); padding: 8px; font-size: 0.75rem;">💾 EXPORT PGN</button>
+                </div>
+            </div>
+
+            <!-- Move History -->
+            <div style="background: #0a0a0a; padding: 12px; border-radius: 10px; border: 1px solid #222; max-height: calc(100vh - 350px); overflow-y: auto;">
+                <div style="font-size: 0.65rem; color: var(--gold); text-transform: uppercase; font-weight: 800; letter-spacing: 1px; margin-bottom: 12px;">MOVE HISTORY</div>
+                <div id="move-history-list">
+                    <div style="text-align: center; color: #666; padding: 40px 20px; font-size: 0.8rem;">No moves yet. Game will begin once both players are seated.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- END MOVES TAB -->
+
+    <!-- SETTINGS TAB CONTENT -->
+    <div id="tab-content-settings" class="tab-content" style="display: none;">
+        <div style="padding: 20px;">
+            <div style="font-size: 0.65rem; color: var(--gold); text-transform: uppercase; font-weight: 800; letter-spacing: 1px; margin-bottom: 20px;">ACCESSIBILITY SETTINGS</div>
+
+            <!-- Sound Effects -->
+            <div style="margin-bottom: 25px;">
+                <div style="font-size: 0.9rem; font-weight: 700; color: #eee; margin-bottom: 10px; display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 1.2rem;">🔊</span> Sound Effects
+                </div>
+                <div style="display: flex; gap: 10px;">
+                    <button class="setting-toggle active" id="setting-sound-on" onclick="app.setSetting('sound', true)">ON</button>
+                    <button class="setting-toggle" id="setting-sound-off" onclick="app.setSetting('sound', false)">OFF</button>
+                </div>
+            </div>
+
+            <!-- Animations -->
+            <div style="margin-bottom: 25px;">
+                <div style="font-size: 0.9rem; font-weight: 700; color: #eee; margin-bottom: 10px; display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 1.2rem;">🎬</span> Animations
+                </div>
+                <div style="display: flex; gap: 10px;">
+                    <button class="setting-toggle active" id="setting-animation-on" onclick="app.setSetting('animation', true)">ON</button>
+                    <button class="setting-toggle" id="setting-animation-off" onclick="app.setSetting('animation', false)">OFF</button>
+                </div>
+            </div>
+
+            <!-- Ambient Music -->
+            <div style="margin-bottom: 25px;">
+                <div style="font-size: 0.9rem; font-weight: 700; color: #eee; margin-bottom: 10px; display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 1.2rem;">🎵</span> Ambient Music
+                </div>
+                <div style="display: flex; gap: 10px;">
+                    <button class="setting-toggle active" id="setting-music-on" onclick="app.setSetting('music', true)">ON</button>
+                    <button class="setting-toggle" id="setting-music-off" onclick="app.setSetting('music', false)">OFF</button>
+                </div>
+                <div style="font-size: 0.7rem; color: #666; margin-top: 8px; line-height: 1.4;">Background music plays while you're in the game room.</div>
+            </div>
+
+            <!-- Auto-Save Games -->
+            <div style="margin-bottom: 25px;">
+                <div style="font-size: 0.9rem; font-weight: 700; color: #eee; margin-bottom: 10px; display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 1.2rem;">💾</span> Auto-Save Games
+                </div>
+                <div style="display: flex; gap: 10px;">
+                    <button class="setting-toggle active" id="setting-autosave-on" onclick="app.setSetting('autosave', true)">ON</button>
+                    <button class="setting-toggle" id="setting-autosave-off" onclick="app.setSetting('autosave', false)">OFF</button>
+                </div>
+                <div style="font-size: 0.7rem; color: #666; margin-top: 8px; line-height: 1.4;">Automatically saves game moves to your browser and profile for later review.</div>
+            </div>
+
+            <!-- Music Credits -->
+            <div style="background: #0a0a0a; padding: 15px; border-radius: 12px; border: 1px solid #222; margin-top: 30px;">
+                <div style="font-size: 0.75rem; color: var(--gold); text-transform: uppercase; font-weight: 800; letter-spacing: 1px; margin-bottom: 10px; display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 1rem;">🎵</span> Music Credits
+                </div>
+                <div style="font-size: 0.65rem; color: #999; line-height: 1.8;">
+                    <!-- Track 1 -->
+                    <div style="margin-bottom: 12px;">
+                        <strong style="color: #eee;">Beyond</strong> by <a href="https://soundcloud.com/onycsmusic" target="_blank" style="color: var(--gold); text-decoration: none;">Onycs</a><br>
+                        <span style="color: #666;">Creative Commons — Attribution 3.0 Unported — CC BY 3.0</span><br>
+                        Free Download: <a href="https://audiolibrary.com.co/onycs/beyond" target="_blank" style="color: var(--gold); text-decoration: none;">Audio Library</a><br>
+                        Music promoted by <a href="https://youtu.be/mBQ2tunOn-U" target="_blank" style="color: var(--gold); text-decoration: none;">Audio Library</a>
+                    </div>
+                    <!-- Track 2 -->
+                    <div style="margin-bottom: 12px;">
+                        <strong style="color: #eee;">Dreamcatcher</strong> by <a href="https://soundcloud.com/onycsmusic" target="_blank" style="color: var(--gold); text-decoration: none;">Onycs</a><br>
+                        <span style="color: #666;">Creative Commons — Attribution 3.0 Unported — CC BY 3.0</span><br>
+                        Free Download: <a href="https://www.audiolibrary.com.co/onycs/dreamcatcher" target="_blank" style="color: var(--gold); text-decoration: none;">Audio Library</a><br>
+                        Music promoted by <a href="https://youtu.be/2ulu1diX_kg" target="_blank" style="color: var(--gold); text-decoration: none;">Audio Library</a>
+                    </div>
+                    <!-- Track 3 -->
+                    <div>
+                        <strong style="color: #eee;">Paradise</strong> by <a href="https://soundcloud.com/onycsmusic" target="_blank" style="color: var(--gold); text-decoration: none;">Onycs</a><br>
+                        <span style="color: #666;">Creative Commons — Attribution 3.0 Unported — CC BY 3.0</span><br>
+                        Free Download: <a href="https://www.audiolibrary.com.co/onycs/paradise" target="_blank" style="color: var(--gold); text-decoration: none;">Audio Library</a><br>
+                        Music promoted by <a href="https://youtu.be/G92hS8eUVaU" target="_blank" style="color: var(--gold); text-decoration: none;">Audio Library</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- END SETTINGS TAB -->
+
+    <!-- Exit -->
+    <div class="bottom-nav">
+        <button class="btn-action btn-blue" onclick="app.handleExit()">Exit to Lobby</button>
+    </div>
+</div>
+
+<script type="module">
+    import { XQApp } from "./xq-app-NEW.js";
+    // Initialize the Orchestrator which manages all modules (Engine, UI, Firebase)
+    window.app = new XQApp();
+    window.app.init();
+
+    // Wire up draw offer modal buttons
+    document.getElementById('btn-accept-draw-modal').onclick = () => {
+        window.app.acceptDraw();
+    };
+
+    document.getElementById('btn-reject-draw-modal').onclick = () => {
+        window.app.rejectDraw();
+    };
+
+    // Wire up battle request modal buttons
+    document.getElementById('btn-accept-battle-modal').onclick = () => {
+        window.app.acceptBattleRequest();
+    };
+
+    document.getElementById('btn-reject-battle-modal').onclick = () => {
+        window.app.rejectBattleRequest();
+    };
+</script>
+
+</body>
+</html>

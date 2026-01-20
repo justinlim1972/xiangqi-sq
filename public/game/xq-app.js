@@ -41,6 +41,7 @@ export class XQApp {
         this.table = null;
         this.gameState = null;
         this.previousGameStatus = null; // Track previous game status to detect battle start
+        this.previousTurn = null; // Track previous turn to detect turn changes
         this.occupants = []; // Initialize as empty array
         this.lastButtonState = null; // Track button state to prevent unnecessary recreation
         this.myPieceStyle = 'ivory'; // Default piece style
@@ -72,17 +73,35 @@ export class XQApp {
         this.timerInterval = null;
         this.redTimeLeft = 15 * 60; // 15 minutes in seconds
         this.blackTimeLeft = 15 * 60;
+        this.timeIncrement = 0; // Will be loaded from region data
 
-        // Settings (load from localStorage)
+        // Settings (load from localStorage and remember user's preference)
+        // If value is null (never set), default to ON
+        // If value is 'true', setting is ON
+        // If value is 'false', setting is OFF (respect user's choice)
+        const musicSetting = localStorage.getItem('xq-setting-music');
+        const soundSetting = localStorage.getItem('xq-setting-sound');
+        const animationSetting = localStorage.getItem('xq-setting-animation');
+        const autosaveSetting = localStorage.getItem('xq-setting-autosave');
+
         this.settings = {
-            sound: localStorage.getItem('xq-setting-sound') !== 'false', // default ON
-            animation: localStorage.getItem('xq-setting-animation') !== 'false', // default ON
-            autosave: localStorage.getItem('xq-setting-autosave') !== 'false', // default ON
-            music: localStorage.getItem('xq-setting-music') !== 'false' // default ON
+            sound: soundSetting !== 'false', // default ON if null, OFF if 'false'
+            animation: animationSetting !== 'false', // default ON if null, OFF if 'false'
+            autosave: autosaveSetting !== 'false', // default ON if null, OFF if 'false'
+            music: musicSetting !== 'false' // default ON if null, OFF if 'false'
         };
+
+        // Debug log to track settings state
+        console.log('⚙️ Settings loaded from localStorage:', {
+            sound: this.settings.sound + ' (localStorage: "' + soundSetting + '")',
+            animation: this.settings.animation + ' (localStorage: "' + animationSetting + '")',
+            autosave: this.settings.autosave + ' (localStorage: "' + autosaveSetting + '")',
+            music: this.settings.music + ' (localStorage: "' + musicSetting + '")'
+        });
 
         // Ambient music system
         this.ambientMusic = null;
+        this.musicUnblockListenerAdded = false; // Track if we've added autoplay unblock listener
         this.musicTracks = [
             '/music/beyond-by-onycs.mp3',
             '/music/cyber-shogun.mp3',
@@ -102,6 +121,11 @@ export class XQApp {
 
         // Battle rejection notification timer
         this.battleRejectionCountdownTimer = null;
+
+        // Timer sync optimization - LOCAL ONLY (no Firebase sync)
+        this.timerTickCount = 0; // Track seconds elapsed for optimized syncing
+        this.lastMoveTime = Date.now(); // Track when last move was made for time calculation
+        this.turnStartTime = Date.now(); // Track when current turn started
 
         this.hasJoined = false;
         window.addEventListener('beforeunload', () => this.leaveRoom());
@@ -217,6 +241,9 @@ export class XQApp {
 
                 this.syncTable();
                 this.syncGame();
+
+                // Initialize settings UI to match loaded settings
+                this.initializeSettingsUI();
             } catch (err) {
                 console.error("Init Error:", err);
                 this.hideLoader();
@@ -327,8 +354,12 @@ export class XQApp {
     async startTimer() {
         // Stop any existing timer
         if (this.timerInterval) {
+            console.warn('⚠️ Timer already running! Clearing old interval...');
             clearInterval(this.timerInterval);
+            this.timerInterval = null;
         }
+
+        console.log('⏱️ Starting timer...');
 
         // Show timer displays
         const redTimerEl = document.getElementById('red-timer');
@@ -363,45 +394,33 @@ export class XQApp {
         this.blackTimeLeft = baseTime * 60;
         this.updateTimerDisplay();
 
-        // Initialize timer in Firestore
-        const gameRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'games', this.tid);
-        await setDoc(gameRef, {
-            redTimeLeft: this.redTimeLeft,
-            blackTimeLeft: this.blackTimeLeft,
-            timeIncrement: this.timeIncrement
-        }, { merge: true });
+        // Store turn start time for local calculation
+        // IMPORTANT: Use game's lastMove timestamp if available, otherwise use current time
+        if (this.gameState && this.gameState.lastMove && this.gameState.lastMove.ts) {
+            this.turnStartTime = this.gameState.lastMove.ts;
+            console.log(`⏱️ Initialized turnStartTime from lastMove: ${this.turnStartTime}`);
+        } else {
+            this.turnStartTime = Date.now();
+            console.log(`⏱️ Initialized turnStartTime from Date.now(): ${this.turnStartTime}`);
+        }
 
-        // Start countdown
-        this.timerInterval = setInterval(async () => {
+        // NO Firebase timer sync - timers are purely local now
+
+        console.log(`⏱️ Starting LOCAL timer for ALL clients (no Firebase sync).`);
+
+        // Reset tick counter when starting new timer
+        this.timerTickCount = 0;
+
+        // LOCAL TIMER: Runs on ALL clients independently (no Firebase sync!)
+        this.timerInterval = setInterval(() => {
             if (!this.gameState || this.gameState.status !== 'playing') {
                 this.stopTimer();
                 return;
             }
 
-            // CRITICAL FIX: Only the player whose turn it is should decrement the timer
-            // This prevents both players from running timers simultaneously
-            if (!this.table || !this.user) {
-                console.warn('⚠️ Table or user not loaded yet, skipping timer tick');
-                return;
-            }
-
-            const iAmRed = this.table.playerRed?.uid === this.user.uid;
-            const iAmBlack = this.table.playerBlack?.uid === this.user.uid;
-            const isMyTurn = (this.gameState.turn === 'red' && iAmRed) || (this.gameState.turn === 'black' && iAmBlack);
-
-            console.log(`⏱️ Timer tick - Turn: ${this.gameState.turn}, I am Red: ${iAmRed}, I am Black: ${iAmBlack}, My turn: ${isMyTurn}`);
-
-            // Only decrement and sync if it's my turn
-            if (!isMyTurn) {
-                // Not my turn or I'm an observer, just update display from Firestore values
-                this.updateTimerDisplay();
-                return;
-            }
-
-            // It's my turn - decrement my timer
+            // Decrement the timer for whoever's turn it is
             if (this.gameState.turn === 'red') {
                 this.redTimeLeft--;
-                console.log(`⏱️ RED timer decremented to ${this.redTimeLeft}s by ${this.user.uid}`);
                 if (this.redTimeLeft <= 0) {
                     this.redTimeLeft = 0;
                     this.handleTimeout('red');
@@ -409,7 +428,6 @@ export class XQApp {
                 }
             } else {
                 this.blackTimeLeft--;
-                console.log(`⏱️ BLACK timer decremented to ${this.blackTimeLeft}s by ${this.user.uid}`);
                 if (this.blackTimeLeft <= 0) {
                     this.blackTimeLeft = 0;
                     this.handleTimeout('black');
@@ -419,16 +437,51 @@ export class XQApp {
 
             this.updateTimerDisplay();
 
-            // Sync to Firestore so all clients see the updated timer
-            try {
-                await setDoc(gameRef, {
-                    redTimeLeft: this.redTimeLeft,
-                    blackTimeLeft: this.blackTimeLeft
-                }, { merge: true });
-                console.log(`⏱️ Synced timer to Firestore: Red=${this.redTimeLeft}s, Black=${this.blackTimeLeft}s`);
-            } catch (error) {
-                console.error('❌ Failed to sync timer to Firestore:', error);
+            console.log(`⏱️ LOCAL timer tick: Red=${this.redTimeLeft}s, Black=${this.blackTimeLeft}s, Turn=${this.gameState.turn}`);
+        }, 1000);
+    }
+
+    startTimerInterval() {
+        // Start ONLY the interval, without initialization
+        // This is called when turn changes
+        console.log('⏱️ Starting LOCAL timer interval (no Firebase sync)...');
+
+        // Stop any existing interval first
+        if (this.timerInterval) {
+            clearInterval(this.timerInterval);
+            this.timerInterval = null;
+        }
+
+        // Reset tick counter
+        this.timerTickCount = 0;
+
+        // LOCAL TIMER: Runs on ALL clients independently (no Firebase sync!)
+        this.timerInterval = setInterval(() => {
+            if (!this.gameState || this.gameState.status !== 'playing') {
+                this.stopTimer();
+                return;
             }
+
+            // Decrement the timer for whoever's turn it is
+            if (this.gameState.turn === 'red') {
+                this.redTimeLeft--;
+                if (this.redTimeLeft <= 0) {
+                    this.redTimeLeft = 0;
+                    this.handleTimeout('red');
+                    return;
+                }
+            } else {
+                this.blackTimeLeft--;
+                if (this.blackTimeLeft <= 0) {
+                    this.blackTimeLeft = 0;
+                    this.handleTimeout('black');
+                    return;
+                }
+            }
+
+            this.updateTimerDisplay();
+
+            console.log(`⏱️ LOCAL timer tick: Red=${this.redTimeLeft}s, Black=${this.blackTimeLeft}s, Turn=${this.gameState.turn}`);
         }, 1000);
     }
 
@@ -437,6 +490,9 @@ export class XQApp {
             clearInterval(this.timerInterval);
             this.timerInterval = null;
         }
+
+        // Reset tick counter
+        this.timerTickCount = 0;
 
         // Hide timer displays
         const redTimerEl = document.getElementById('red-timer');
@@ -780,9 +836,11 @@ export class XQApp {
 
             // Detect battle start: Show splash screen for EVERYONE when game status changes to 'playing'
             // IMPORTANT: Only show if previous status was explicitly NOT 'playing' (avoid showing on page load)
-            if (g.status === 'playing' && this.previousGameStatus !== null && this.previousGameStatus !== 'playing') {
+            const battleJustStarted = g.status === 'playing' && this.previousGameStatus !== null && this.previousGameStatus !== 'playing';
+            if (battleJustStarted) {
                 console.log('⚔️ Battle just started! Showing splash for everyone...');
                 this.showBattleSplash();
+                // Timer will start automatically after splash ends (in showBattleSplash)
             }
 
             // Update previous status for next comparison (set to null on first load if no previous status)
@@ -792,18 +850,63 @@ export class XQApp {
                 this.previousGameStatus = g.status;
             }
 
-            // Sync timer values from Firestore to show stress animation on all clients
-            // CRITICAL: Only update timer from Firestore if it's NOT my turn to prevent double decrements
-            const iAmRed = this.table?.playerRed?.uid === this.user?.uid;
-            const iAmBlack = this.table?.playerBlack?.uid === this.user?.uid;
-            const isMyTurn = (g.turn === 'red' && iAmRed) || (g.turn === 'black' && iAmBlack);
+            // LOCAL TIMER SYNC: Use move timestamps to synchronize time
+            // When a move happens, calculate time used by previous player
+            const turnChanged = this.previousTurn !== null && this.previousTurn !== g.turn;
 
-            if (!isMyTurn) {
-                // Not my turn - sync from Firestore
-                if (g.redTimeLeft !== undefined) this.redTimeLeft = g.redTimeLeft;
-                if (g.blackTimeLeft !== undefined) this.blackTimeLeft = g.blackTimeLeft;
+            if (turnChanged && g.lastMove && g.lastMove.ts) {
+                console.log(`🔄 Turn changed from ${this.previousTurn} to ${g.turn}`);
+
+                // FETCH INCREMENT FROM FIRESTORE DIRECTLY
+                getDoc(doc(this.db, 'artifacts', this.appId, 'public', 'data', 'regions', this.rid)).then(regionSnap => {
+                    const regionData = regionSnap.data();
+                    const increment = regionData?.increment || 0;
+                    console.log(`⏱️ FETCHED increment from Firestore: ${increment}`);
+
+                    // Calculate time used by previous player based on move timestamp
+                    const moveTimestamp = g.lastMove.ts;
+                    const timeElapsed = Math.floor((moveTimestamp - this.turnStartTime) / 1000);
+
+                    console.log(`⏱️ Time calculation: Previous turn took ${timeElapsed}s (from ${this.turnStartTime} to ${moveTimestamp})`);
+
+                    // Deduct time from the player who just moved
+                    const previousPlayer = this.previousTurn;
+                    if (previousPlayer === 'red') {
+                        this.redTimeLeft = Math.max(0, this.redTimeLeft - timeElapsed);
+                        console.log(`⏱️ Adjusted RED time: ${this.redTimeLeft}s (deducted ${timeElapsed}s)`);
+                    } else if (previousPlayer === 'black') {
+                        this.blackTimeLeft = Math.max(0, this.blackTimeLeft - timeElapsed);
+                        console.log(`⏱️ Adjusted BLACK time: ${this.blackTimeLeft}s (deducted ${timeElapsed}s)`);
+                    }
+
+                    // Add time increment if configured
+                    console.log(`🔍 DEBUG: increment = ${increment}, type = ${typeof increment}`);
+                    if (increment && increment > 0) {
+                        if (previousPlayer === 'red') {
+                            this.redTimeLeft += increment;
+                            console.log(`⏱️ Added ${increment}s increment to RED: ${this.redTimeLeft}s`);
+                        } else if (previousPlayer === 'black') {
+                            this.blackTimeLeft += increment;
+                            console.log(`⏱️ Added ${increment}s increment to BLACK: ${this.blackTimeLeft}s`);
+                        }
+                    } else {
+                        console.log(`⚠️ INCREMENT SKIPPED: increment = ${increment}`);
+                    }
+
+                    // Update turn start time for next calculation
+                    this.turnStartTime = moveTimestamp;
+
+                    // Update display
+                    this.updateTimerDisplay();
+
+                    // Ensure timer is running
+                    if (!this.timerInterval) {
+                        this.startTimerInterval();
+                    }
+                });
             }
-            // If it's my turn, don't overwrite my local timer - I'm the one controlling it
+
+            this.previousTurn = g.turn;
 
             // Update timer display and stress animation
             if (g.status === 'playing') {
@@ -927,8 +1030,9 @@ export class XQApp {
             if (g.status === 'playing' && g.board) {
                 console.log('♟️ Attempting to render pieces...');
 
-                // Start timer if not already started
-                if (!this.timerInterval) {
+                // Start timer if not already started (but not during battle start splash)
+                // Timer will be started automatically after splash ends
+                if (!this.timerInterval && !battleJustStarted) {
                     this.startTimer();
                 }
 
@@ -1647,11 +1751,17 @@ export class XQApp {
             window.speechSynthesis.speak(utterance);
         }
 
-        // Hide splash after 7 seconds
+        // Hide splash after 5 seconds
         setTimeout(() => {
             splash.classList.remove('active');
             console.log('🎬 Battle splash hidden');
-        }, 7000);
+
+            // Start timer after splash ends
+            if (!this.timerInterval && this.gameState?.status === 'playing') {
+                console.log('⏱️ Starting timer after splash screen...');
+                this.startTimer();
+            }
+        }, 5000);
     }
 
     async engageBattle() {
@@ -1910,18 +2020,8 @@ export class XQApp {
             if (winner) updateData.winner = winner;
         }
 
-        // Add time increment to the player who just moved
-        const increment = this.gameState.timeIncrement || 0;
-        if (increment > 0) {
-            const currentPlayerColor = this.gameState.turn; // The player who just moved
-            if (currentPlayerColor === 'red') {
-                updateData.redTimeLeft = (this.gameState.redTimeLeft || this.redTimeLeft) + increment;
-                console.log(`⏱️ Adding ${increment}s increment to red. New time: ${updateData.redTimeLeft}s`);
-            } else {
-                updateData.blackTimeLeft = (this.gameState.blackTimeLeft || this.blackTimeLeft) + increment;
-                console.log(`⏱️ Adding ${increment}s increment to black. New time: ${updateData.blackTimeLeft}s`);
-            }
-        }
+        // NO TIMER SYNC - timers are purely local now
+        // Time increments are handled locally via move timestamps
 
         await setDoc(gameRef, updateData, { merge: true });
 
@@ -1959,14 +2059,16 @@ export class XQApp {
 
         // Update game status
         const gameRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'games', this.tid);
+        const resignationTime = Date.now();
         await setDoc(gameRef, {
             status: 'finished',
             winner: winner,
             reason: 'resignation',
+            finishedAt: resignationTime, // Add timestamp to prevent duplicate animations
             chat: arrayUnion({
                 user: 'SYSTEM',
                 text: `🏳️ ${myName} (${myColor.toUpperCase()}) has resigned. ${winner.toUpperCase()} wins!`,
-                ts: Date.now()
+                ts: resignationTime
             })
         }, { merge: true });
 
@@ -2906,11 +3008,40 @@ export class XQApp {
     }
 
     /**
+     * Initialize settings UI to match loaded settings
+     */
+    initializeSettingsUI() {
+        console.log('⚙️ Initializing settings UI to match loaded settings...');
+
+        // Update each setting toggle to match current state
+        ['sound', 'animation', 'music', 'autosave'].forEach(settingName => {
+            const value = this.settings[settingName];
+            const onBtn = document.getElementById(`setting-${settingName}-on`);
+            const offBtn = document.getElementById(`setting-${settingName}-off`);
+
+            if (onBtn && offBtn) {
+                if (value) {
+                    onBtn.classList.add('active');
+                    offBtn.classList.remove('active');
+                } else {
+                    onBtn.classList.remove('active');
+                    offBtn.classList.add('active');
+                }
+                console.log(`  ${settingName}: ${value ? 'ON' : 'OFF'}`);
+            }
+        });
+
+        console.log('✅ Settings UI initialized');
+    }
+
+    /**
      * Change setting
      */
     setSetting(settingName, value) {
         this.settings[settingName] = value;
         localStorage.setItem(`xq-setting-${settingName}`, value);
+
+        console.log(`⚙️ Setting "${settingName}" changed to: ${value}`);
 
         // Update UI
         const onBtn = document.getElementById(`setting-${settingName}-on`);
@@ -2929,8 +3060,10 @@ export class XQApp {
         // If music setting changed, handle music accordingly
         if (settingName === 'music') {
             if (value && this.occupants && this.occupants.length > 0) {
+                console.log('🔊 Music enabled, starting ambient music...');
                 this.startAmbientMusic();
             } else if (!value) {
+                console.log('🔇 Music disabled, stopping ambient music...');
                 this.stopAmbientMusic();
             }
         }
@@ -2966,7 +3099,21 @@ export class XQApp {
         // Play music
         this.ambientMusic.play().catch(err => {
             console.log('🎵 Music autoplay blocked (browser policy):', err.message);
-            // This is expected on page load - music will start on first user interaction
+            // Add one-time click listener to start music on first user interaction
+            if (!this.musicUnblockListenerAdded) {
+                this.musicUnblockListenerAdded = true;
+                const unblockMusic = () => {
+                    console.log('🎵 User interaction detected, attempting to play music...');
+                    if (this.ambientMusic && this.ambientMusic.paused && this.settings.music) {
+                        this.ambientMusic.play().catch(e => console.log('🎵 Still blocked:', e.message));
+                    }
+                    document.removeEventListener('click', unblockMusic);
+                    document.removeEventListener('keydown', unblockMusic);
+                };
+                document.addEventListener('click', unblockMusic);
+                document.addEventListener('keydown', unblockMusic);
+                console.log('🎵 Music will start on first click or keypress');
+            }
         });
 
         console.log('🎵 Ambient music started:', currentTrack, `(Track ${this.currentTrackIndex + 1}/${this.musicTracks.length})`);

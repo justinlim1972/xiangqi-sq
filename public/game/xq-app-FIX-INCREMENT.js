@@ -849,8 +849,13 @@ export class XQApp {
             // When a move happens, calculate time used by previous player
             const turnChanged = this.previousTurn !== null && this.previousTurn !== g.turn;
 
-            if (turnChanged && g.lastMove && g.lastMove.ts) {
-                console.log(`🔄 Turn changed from ${this.previousTurn} to ${g.turn}`);
+            // CRITICAL: Only add increment if there was an actual move (not just game start)
+            // Check that lastMove has both 'from' and 'to' fields, indicating a real move was made
+            const actualMoveMade = g.lastMove && g.lastMove.from && g.lastMove.to && g.lastMove.ts;
+
+            if (turnChanged && actualMoveMade) {
+                console.log(`🔄 Turn changed from ${this.previousTurn} to ${g.turn} - ACTUAL MOVE DETECTED`);
+                console.log(`   Move: ${g.lastMove.from} → ${g.lastMove.to}`);
 
                 // FETCH INCREMENT FROM FIRESTORE DIRECTLY
                 const regionSnap = await getDoc(doc(this.db, 'artifacts', this.appId, 'public', 'data', 'regions', this.rid));
@@ -858,46 +863,35 @@ export class XQApp {
                 const increment = regionData?.increment || 0;
                 console.log(`⏱️ FETCHED increment from Firestore: ${increment}`);
 
-                // Calculate time used by previous player based on move timestamp
-                const moveTimestamp = g.lastMove.ts;
-                const timeElapsed = Math.floor((moveTimestamp - this.turnStartTime) / 1000);
-
-                console.log(`⏱️ Time calculation: Previous turn took ${timeElapsed}s (from ${this.turnStartTime} to ${moveTimestamp})`);
-
-                // Deduct time from the player who just moved
+                // Add time increment to the player who just moved
+                // NOTE: Time deduction already happened via local timer countdown (lines 460-475)
+                // We only need to add the increment bonus
                 const previousPlayer = this.previousTurn;
-                if (previousPlayer === 'red') {
-                    this.redTimeLeft = Math.max(0, this.redTimeLeft - timeElapsed);
-                    console.log(`⏱️ Adjusted RED time: ${this.redTimeLeft}s (deducted ${timeElapsed}s)`);
-                } else if (previousPlayer === 'black') {
-                    this.blackTimeLeft = Math.max(0, this.blackTimeLeft - timeElapsed);
-                    console.log(`⏱️ Adjusted BLACK time: ${this.blackTimeLeft}s (deducted ${timeElapsed}s)`);
-                }
-
-                // Add time increment if configured
-                console.log(`🔍 DEBUG: increment = ${increment}, type = ${typeof increment}`);
+                console.log(`⏱️ Increment logic: increment = ${increment}, type = ${typeof increment}`);
                 if (increment && increment > 0) {
                     if (previousPlayer === 'red') {
                         this.redTimeLeft += increment;
-                        console.log(`⏱️ Added ${increment}s increment to RED: ${this.redTimeLeft}s`);
+                        console.log(`✅ Added ${increment}s increment to RED: ${this.redTimeLeft}s`);
                     } else if (previousPlayer === 'black') {
                         this.blackTimeLeft += increment;
-                        console.log(`⏱️ Added ${increment}s increment to BLACK: ${this.blackTimeLeft}s`);
+                        console.log(`✅ Added ${increment}s increment to BLACK: ${this.blackTimeLeft}s`);
                     }
                 } else {
-                    console.log(`⚠️ INCREMENT SKIPPED: increment = ${increment}`);
+                    console.log(`⚠️ No increment to add (increment = ${increment})`);
                 }
 
-                // Update turn start time for next calculation
-                this.turnStartTime = moveTimestamp;
+                // Update turn start time for next move
+                this.turnStartTime = g.lastMove.ts;
+            } else if (turnChanged) {
+                console.log(`⚠️ Turn changed but NO MOVE detected - skipping increment`);
+            }
 
-                // Update display
-                this.updateTimerDisplay();
+            // Update display
+            this.updateTimerDisplay();
 
-                // Ensure timer is running
-                if (!this.timerInterval) {
-                    this.startTimerInterval();
-                }
+            // Ensure timer is running
+            if (!this.timerInterval) {
+                this.startTimerInterval();
             }
 
             this.previousTurn = g.turn;
@@ -1006,7 +1000,12 @@ export class XQApp {
                 // Use finishedAt timestamp to track if we've already shown this resignation
                 const resignationTimestamp = g.finishedAt || Date.now();
 
-                if (resignationTimestamp !== this.lastResignationTimestamp) {
+                // On first load, if game is already finished, don't show animation
+                // Initialize lastResignationTimestamp to prevent re-showing old animations
+                if (this.lastResignationTimestamp === null) {
+                    console.log('🔄 First load - game already finished by resignation. Skipping animation.');
+                    this.lastResignationTimestamp = resignationTimestamp;
+                } else if (resignationTimestamp !== this.lastResignationTimestamp) {
                     console.log('🏳️ Detected NEW resignation - showing animation for winner:', g.winner);
                     console.log('   Resignation timestamp:', resignationTimestamp);
                     console.log('   Last shown resignation:', this.lastResignationTimestamp);
