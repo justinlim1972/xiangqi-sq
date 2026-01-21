@@ -13,6 +13,7 @@
         h1 { margin: 0; font-size: 1.4rem; font-weight: 800; letter-spacing: -1px; }
 
         .dashboard-grid { display: grid; grid-template-columns: 350px 1fr; gap: 30px; }
+        .full-width { grid-column: 1 / -1; }
         
         .card { background: white; border-radius: 16px; padding: 25px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border: 1px solid #e2e8f0; margin-bottom: 20px; }
         .card h2 { margin-top: 0; font-size: 1.1rem; border-bottom: 2px solid #f1f5f9; padding-bottom: 15px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }
@@ -54,6 +55,17 @@
 
         #auth-guard { position: fixed; top:0; left:0; width:100%; height:100%; background:white; z-index:9999; display:flex; align-items:center; justify-content:center; flex-direction:column; }
         @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* User Management Table */
+        .user-table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        .user-table th { background: #f8fafc; text-align: left; padding: 12px; font-size: 0.75rem; font-weight: 800; text-transform: uppercase; color: #64748b; border-bottom: 2px solid #e2e8f0; }
+        .user-table td { padding: 12px; border-bottom: 1px solid #f1f5f9; font-size: 0.85rem; }
+        .user-table tr:hover { background: #f8fafc; }
+        .status-online { color: #10b981; font-weight: bold; }
+        .status-offline { color: #94a3b8; }
+        .badge { display: inline-block; padding: 4px 8px; border-radius: 6px; font-size: 0.7rem; font-weight: 700; }
+        .badge-admin { background: #fef3c7; color: #92400e; }
+        .badge-user { background: #e0e7ff; color: #3730a3; }
     </style>
 </head>
 <body>
@@ -67,13 +79,59 @@
     <h1>SG Xiangqi :: Admin Terminal</h1>
     <div style="display: flex; gap: 10px;">
         <button class="btn" style="background:var(--gold); color:#000; font-weight:900;" onclick="forceFixOrdering()">🔧 Fix Region Order</button>
+        <button class="btn" style="background:#10b981; color:white; font-weight:900;" onclick="toggleUserManagement()">👥 User Management</button>
         <button class="btn" style="background:rgba(255,255,255,0.2); color:white;" onclick="window.location.href=window.location.origin + '/lobby/lobby.html'">Exit to Lobby</button>
     </div>
 </header>
 
 <div class="dashboard-grid">
+    <!-- USER MANAGEMENT SECTION (Hidden by default) -->
+    <div id="user-management-section" class="card full-width" style="display:none;">
+        <h2>
+            👥 User Management
+            <button class="btn btn-sm" style="background:#64748b; color:white;" onclick="toggleUserManagement()">Back to Region Management</button>
+        </h2>
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px;">
+            <div style="background: #f0fdf4; padding: 15px; border-radius: 10px; border-left: 4px solid #10b981;">
+                <div style="font-size: 0.75rem; color: #166534; font-weight: 700; text-transform: uppercase;">Total Users</div>
+                <div id="total-users" style="font-size: 1.8rem; font-weight: 900; color: #064e3b; margin-top: 5px;">-</div>
+            </div>
+            <div style="background: #eff6ff; padding: 15px; border-radius: 10px; border-left: 4px solid #3b82f6;">
+                <div style="font-size: 0.75rem; color: #1e40af; font-weight: 700; text-transform: uppercase;">Online Now</div>
+                <div id="online-users" style="font-size: 1.8rem; font-weight: 900; color: #1e3a8a; margin-top: 5px;">-</div>
+            </div>
+            <div style="background: #fef3c7; padding: 15px; border-radius: 10px; border-left: 4px solid #f59e0b;">
+                <div style="font-size: 0.75rem; color: #92400e; font-weight: 700; text-transform: uppercase;">Active Today</div>
+                <div id="active-today" style="font-size: 1.8rem; font-weight: 900; color: #78350f; margin-top: 5px;">-</div>
+            </div>
+            <div style="background: #fce7f3; padding: 15px; border-radius: 10px; border-left: 4px solid #ec4899;">
+                <div style="font-size: 0.75rem; color: #9f1239; font-weight: 700; text-transform: uppercase;">Admins</div>
+                <div id="admin-count" style="font-size: 1.8rem; font-weight: 900; color: #831843; margin-top: 5px;">-</div>
+            </div>
+        </div>
+        <table class="user-table" id="user-table">
+            <thead>
+                <tr>
+                    <th>UID</th>
+                    <th>Player Name</th>
+                    <th>Email</th>
+                    <th>Role</th>
+                    <th>Status</th>
+                    <th>Last Login</th>
+                    <th>Session Duration</th>
+                    <th>Games Played</th>
+                    <th>Last Table</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="user-table-body">
+                <tr><td colspan="10" style="text-align:center; padding:40px; color:#94a3b8;">Loading user data...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
     <!-- REGION COLUMN -->
-    <aside>
+    <aside id="region-column">
         <div class="card">
             <h2>Regions <button class="btn btn-primary btn-sm" onclick="showAddRegion()">+ Add</button></h2>
             <div id="region-list" class="item-list">
@@ -122,7 +180,7 @@
     </aside>
 
     <!-- TABLES COLUMN -->
-    <main>
+    <main id="tables-column">
         <div class="card">
             <h2>
                 Table Management 
@@ -700,6 +758,288 @@
 
     window.showAddTable = () => document.getElementById('table-modal').style.display = 'flex';
     window.closeModals = () => document.querySelectorAll('.modal').forEach(m => m.style.display = 'none');
+
+    // User Management Functions
+    let usersUnsubscribe = null;
+
+    window.toggleUserManagement = () => {
+        const userSection = document.getElementById('user-management-section');
+        const regionColumn = document.getElementById('region-column');
+        const tablesColumn = document.getElementById('tables-column');
+
+        if (userSection.style.display === 'none') {
+            // Show user management
+            userSection.style.display = 'block';
+            regionColumn.style.display = 'none';
+            tablesColumn.style.display = 'none';
+            loadUserManagement();
+        } else {
+            // Hide user management
+            userSection.style.display = 'none';
+            regionColumn.style.display = 'block';
+            tablesColumn.style.display = 'block';
+            if (usersUnsubscribe) {
+                usersUnsubscribe();
+                usersUnsubscribe = null;
+            }
+        }
+    };
+
+    async function loadUserManagement() {
+        try {
+            // Build user data from table information (public data only)
+            const userMap = new Map();
+            const regionsRef = collection(db, 'artifacts', appId, 'public', 'data', 'regions');
+            const regionsSnap = await getDocs(regionsRef);
+
+            const now = Date.now();
+
+            // First pass: Collect all user data from tables
+            for (const regionDoc of regionsSnap.docs) {
+                const tablesRef = collection(db, 'artifacts', appId, 'public', 'data', 'regions', regionDoc.id, 'tables');
+                const tablesSnap = await getDocs(tablesRef);
+
+                for (const tableDoc of tablesSnap.docs) {
+                    const table = tableDoc.data();
+
+                    // Process Red Player
+                    if (table.playerRed?.uid) {
+                        const uid = table.playerRed.uid;
+                        if (!userMap.has(uid)) {
+                            userMap.set(uid, {
+                                uid,
+                                email: table.playerRed.email || 'N/A',
+                                playerName: table.playerRed.playerName || 'Anonymous',
+                                role: 'user', // Default role
+                                lastSeen: 0,
+                                gamesPlayed: 0,
+                                lastTable: '-',
+                                currentTable: null
+                            });
+                        }
+
+                        const userData = userMap.get(uid);
+
+                        // Check if currently seated
+                        if (table.status === 'waiting' || table.status === 'playing') {
+                            userData.currentTable = tableDoc.id;
+                            userData.lastSeen = now;
+                        }
+                    }
+
+                    // Process Black Player
+                    if (table.playerBlack?.uid) {
+                        const uid = table.playerBlack.uid;
+                        if (!userMap.has(uid)) {
+                            userMap.set(uid, {
+                                uid,
+                                email: table.playerBlack.email || 'N/A',
+                                playerName: table.playerBlack.playerName || 'Anonymous',
+                                role: 'user', // Default role
+                                lastSeen: 0,
+                                gamesPlayed: 0,
+                                lastTable: '-',
+                                currentTable: null
+                            });
+                        }
+
+                        const userData = userMap.get(uid);
+
+                        // Check if currently seated
+                        if (table.status === 'waiting' || table.status === 'playing') {
+                            userData.currentTable = tableDoc.id;
+                            userData.lastSeen = now;
+                        }
+                    }
+                }
+            }
+
+            console.log(`Found ${userMap.size} unique users from tables`);
+
+            // Second pass: Count games played
+            for (const regionDoc of regionsSnap.docs) {
+                const tablesRef = collection(db, 'artifacts', appId, 'public', 'data', 'regions', regionDoc.id, 'tables');
+                const tablesSnap = await getDocs(tablesRef);
+
+                for (const tableDoc of tablesSnap.docs) {
+                    const table = tableDoc.data();
+
+                    // Check both players
+                    for (const player of [table.playerRed, table.playerBlack]) {
+                        if (player?.uid && userMap.has(player.uid)) {
+                            // Get game data to check if any moves were made
+                            try {
+                                const gameRef = doc(db, 'artifacts', appId, 'public', 'data', 'games', tableDoc.id);
+                                const gameSnap = await getDoc(gameRef);
+
+                                if (gameSnap.exists()) {
+                                    const game = gameSnap.data();
+                                    const history = game.history || [];
+
+                                    if (history.length > 0) {
+                                        const userData = userMap.get(player.uid);
+                                        userData.gamesPlayed++;
+                                        userData.lastTable = tableDoc.id;
+
+                                        // Update last seen based on last move time
+                                        const lastMove = history[history.length - 1];
+                                        if (lastMove?.ts) {
+                                            userData.lastSeen = Math.max(userData.lastSeen, lastMove.ts);
+                                        }
+                                    }
+                                }
+                            } catch (err) {
+                                console.error('Error counting games for table', tableDoc.id, err);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Try to fetch role information for current admin user (if they have permission)
+            try {
+                const currentUser = auth.currentUser;
+                if (currentUser) {
+                    const adminProfileRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'profile', 'data');
+                    const adminProfileSnap = await getDoc(adminProfileRef);
+
+                    if (adminProfileSnap.exists()) {
+                        const adminProfile = adminProfileSnap.data();
+
+                        // If current user is admin, try to fetch role info for all users
+                        if (adminProfile.role === 'admin') {
+                            for (const [uid, userData] of userMap) {
+                                try {
+                                    const profileRef = doc(db, 'artifacts', appId, 'users', uid, 'profile', 'data');
+                                    const profileSnap = await getDoc(profileRef);
+
+                                    if (profileSnap.exists()) {
+                                        const profile = profileSnap.data();
+                                        userData.role = profile.role || 'user';
+                                    }
+                                } catch (err) {
+                                    console.log(`Cannot read profile for user ${uid} - using default role`);
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (err) {
+                console.log('Cannot verify admin status or read user roles - showing default roles only');
+            }
+
+            const users = Array.from(userMap.values());
+
+            const oneDayAgo = now - (24 * 60 * 60 * 1000);
+
+            // Update statistics
+            document.getElementById('total-users').textContent = users.length;
+            document.getElementById('online-users').textContent = users.filter(u => u.currentTable).length;
+            document.getElementById('active-today').textContent = users.filter(u => u.lastSeen > oneDayAgo).length;
+            document.getElementById('admin-count').textContent = users.filter(u => u.role === 'admin').length;
+
+            // Sort by last seen (most recent first)
+            users.sort((a, b) => b.lastSeen - a.lastSeen);
+
+            // Render table
+            const tbody = document.getElementById('user-table-body');
+            tbody.innerHTML = '';
+
+            users.forEach(user => {
+                const row = document.createElement('tr');
+
+                const isOnline = user.currentTable !== null;
+                const statusClass = isOnline ? 'status-online' : 'status-offline';
+                const statusText = isOnline ? '🟢 Online' : '⚫ Offline';
+
+                const lastSeenText = user.lastSeen > 0
+                    ? formatRelativeTime(user.lastSeen)
+                    : 'Never';
+
+                const sessionText = isOnline ? 'Active' : '-';
+
+                const roleBadge = user.role === 'admin'
+                    ? '<span class="badge badge-admin">ADMIN</span>'
+                    : '<span class="badge badge-user">USER</span>';
+
+                const actionButton = user.role === 'admin'
+                    ? `<button class="btn btn-sm" style="background:#ef4444; color:white;" onclick="toggleUserRole('${user.uid}', 'user')">Demote to User</button>`
+                    : `<button class="btn btn-sm" style="background:#10b981; color:white;" onclick="toggleUserRole('${user.uid}', 'admin')">Promote to Admin</button>`;
+
+                row.innerHTML = `
+                    <td style="font-family: monospace; font-size: 0.75rem; color: #64748b;">${user.uid.substring(0, 8)}...</td>
+                    <td><strong>${user.playerName}</strong></td>
+                    <td>${user.email}</td>
+                    <td>${roleBadge}</td>
+                    <td class="${statusClass}">${statusText}</td>
+                    <td>${lastSeenText}</td>
+                    <td>${sessionText}</td>
+                    <td style="text-align: center;">${user.gamesPlayed}</td>
+                    <td style="font-family: monospace; font-size: 0.8rem;">${user.currentTable || user.lastTable}</td>
+                    <td>${actionButton}</td>
+                `;
+                tbody.appendChild(row);
+            });
+        } catch (e) {
+            console.error('Error loading user management:', e);
+            alert('Error loading users: ' + e.message);
+        }
+    }
+
+    function formatRelativeTime(timestamp) {
+        const now = Date.now();
+        const diff = now - timestamp;
+        const seconds = Math.floor(diff / 1000);
+        const minutes = Math.floor(seconds / 60);
+        const hours = Math.floor(minutes / 60);
+        const days = Math.floor(hours / 24);
+
+        if (seconds < 60) return 'Just now';
+        if (minutes < 60) return `${minutes}m ago`;
+        if (hours < 24) return `${hours}h ago`;
+        if (days < 7) return `${days}d ago`;
+
+        const date = new Date(timestamp);
+        return date.toLocaleDateString();
+    }
+
+    function formatDuration(seconds) {
+        const hours = Math.floor(seconds / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        const secs = seconds % 60;
+
+        if (hours > 0) return `${hours}h ${minutes}m`;
+        if (minutes > 0) return `${minutes}m ${secs}s`;
+        return `${secs}s`;
+    }
+
+    window.toggleUserRole = async (uid, newRole) => {
+        const action = newRole === 'admin' ? 'promote to Admin' : 'demote to User';
+
+        if (!confirm(`Are you sure you want to ${action} this user?`)) {
+            return;
+        }
+
+        try {
+            const profileRef = doc(db, 'artifacts', appId, 'users', uid, 'profile', 'data');
+            await updateDoc(profileRef, {
+                role: newRole
+            });
+
+            alert(`User successfully ${newRole === 'admin' ? 'promoted' : 'demoted'}!`);
+
+            // Reload user management to reflect changes
+            loadUserManagement();
+        } catch (e) {
+            console.error('Error updating user role:', e);
+
+            if (e.code === 'permission-denied') {
+                alert('⚠️ Permission denied: You need admin privileges to change user roles.\n\nPlease ensure:\n1. You are logged in as an admin\n2. Your Firestore security rules allow admins to update user profiles');
+            } else {
+                alert('Error updating user role: ' + e.message);
+            }
+        }
+    };
 </script>
 </body>
 </html>

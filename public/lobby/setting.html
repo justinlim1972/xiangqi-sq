@@ -72,6 +72,16 @@
         }
         .avatar-select:focus { border-color: var(--yellow); }
 
+        /* Player Name Input - Shorter border on focus */
+        #player-name-input {
+            outline: none;
+            transition: border-color 0.3s;
+        }
+        #player-name-input:focus {
+            border-color: var(--yellow);
+            box-shadow: 0 0 0 3px rgba(241, 196, 15, 0.1);
+        }
+
         /* Main Area Management */
         main { flex-grow: 1; position: relative; overflow: hidden; background: radial-gradient(circle at center, #1a2333 0%, #05080c 100%); }
         
@@ -223,6 +233,14 @@
     <!-- 2. AVATAR PICKER CONTROLS (DROPDOWN) -->
     <div id="avatar-controls" style="display:none;">
         <div class="menu-section">
+            <span class="section-title">Player Name</span>
+            <input type="text" id="player-name-input" class="avatar-select" placeholder="Enter your display name" maxlength="20" style="font-size: 1rem; text-align: left; max-width: 280px;">
+            <p style="font-size: 0.75rem; color: #666; line-height: 1.5; margin-top: 8px;">
+                This name will be displayed in the lobby and during games.
+            </p>
+        </div>
+
+        <div class="menu-section">
             <span class="section-title">Jump to Portrait</span>
             <select class="avatar-select" id="avatar-jump-menu" onchange="jumpToAvatar(this.value)">
                 <!-- Options populated by JS -->
@@ -301,7 +319,8 @@
         piece: 'ivory',
         board: 'classic',
         environment: 'forest',
-        avatarUrl: '/lobby/1.JPG'
+        avatarUrl: '/lobby/1.JPG',
+        playerName: ''
     };
 
     const pieceTemplates = {
@@ -446,14 +465,30 @@
     window.applyAndSave = async () => {
         const msg = document.getElementById('global-status');
         msg.innerText = "Synchronizing Preferences...";
+
+        // Get player name from input
+        const playerNameInput = document.getElementById('player-name-input');
+        const newPlayerName = playerNameInput ? playerNameInput.value.trim() : '';
+
+        // Validate player name
+        if (newPlayerName === '') {
+            msg.style.color = "#cd3333";
+            msg.innerText = "⚠ Player name cannot be empty";
+            setTimeout(() => msg.innerText = "", 3000);
+            return;
+        }
+
         try {
             const profileRef = doc(db, 'artifacts', appId, 'users', currentUid, 'profile', 'data');
             await updateDoc(profileRef, {
                 pieceSet: selections.piece,
                 boardSet: selections.board,
                 environmentBg: selections.environment,
-                avatarUrl: selections.avatarUrl
+                avatarUrl: selections.avatarUrl,
+                playerName: newPlayerName
             });
+            selections.playerName = newPlayerName;
+            document.getElementById('player-label').innerText = newPlayerName;
             msg.style.color = "#27ae60"; msg.innerText = "✓ Style & Identity Secured";
             setTimeout(() => msg.innerText = "", 3000);
         } catch (e) { msg.style.color = "#cd3333"; msg.innerText = "Error: " + e.message; }
@@ -471,7 +506,13 @@
             selections.board = d.boardSet || 'classic';
             selections.environment = d.environmentBg || 'forest';
             selections.avatarUrl = d.avatarUrl || '/lobby/1.JPG';
-            if (d.playerName) document.getElementById('player-label').innerText = d.playerName;
+            selections.playerName = d.playerName || '';
+
+            if (d.playerName) {
+                document.getElementById('player-label').innerText = d.playerName;
+                const playerNameInput = document.getElementById('player-name-input');
+                if (playerNameInput) playerNameInput.value = d.playerName;
+            }
 
             ['piece', 'board', 'environment'].forEach(type => {
                 const val = selections[type];

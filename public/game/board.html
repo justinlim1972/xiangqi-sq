@@ -93,10 +93,25 @@
             filter: drop-shadow(0 0 15px #cd3333) brightness(1.2);
             animation: opponentPulse 1s ease-in-out infinite;
         }
-        
+
         @keyframes opponentPulse {
             0%, 100% { opacity: 1; }
             50% { opacity: 0.7; }
+        }
+
+        /* Last moved piece highlighting */
+        .last-moved {
+            filter: drop-shadow(0 0 20px #22c55e) drop-shadow(0 0 10px #22c55e) brightness(1.15);
+            animation: lastMovedGlow 2s ease-in-out infinite;
+        }
+
+        @keyframes lastMovedGlow {
+            0%, 100% {
+                filter: drop-shadow(0 0 20px #22c55e) drop-shadow(0 0 10px #22c55e) brightness(1.15);
+            }
+            50% {
+                filter: drop-shadow(0 0 25px #22c55e) drop-shadow(0 0 15px #22c55e) brightness(1.25);
+            }
         }
         
         @keyframes timerPulse {
@@ -718,7 +733,7 @@
 </div>
 
 <script type="module">
-    import { XQApp } from "./xq-app-FIX-INCREMENT.js?v=75";
+    import { XQApp } from "./xq-app-FIX-INCREMENT.js?v=112&t=1737520000";
     // Initialize the Orchestrator which manages all modules (Engine, UI, Firebase)
     window.app = new XQApp();
     window.app.init();

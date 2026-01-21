@@ -1,8 +1,9 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
 import { getFirestore, doc, onSnapshot, setDoc, getDoc, arrayUnion, arrayRemove, deleteField, increment, serverTimestamp, runTransaction } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+import { getDatabase, ref, onValue, onDisconnect, set, remove } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-database.js";
 import { XQEngine } from "./xq-engine.js";
-import { XQUI } from "./xq-ui.js";
+import { XQUI } from "./xq-ui.js?v=107";
 
 /**
  * XQApp - Complete Fixed Orchestrator
@@ -16,17 +17,19 @@ import { XQUI } from "./xq-ui.js";
  */
 export class XQApp {
     constructor() {
-        const config = { 
-            apiKey: "AIzaSyDq_LECOrc4SY90SyDsBQGmwl-YnUNFIj8", 
-            authDomain: "xiangqi-sq.firebaseapp.com", 
-            projectId: "xiangqi-sq", 
-            storageBucket: "xiangqi-sq.firebasestorage.app", 
-            messagingSenderId: "351923336298", 
-            appId: "1:351923336298:web:e7278ea095ba085ac4935b" 
+        const config = {
+            apiKey: "AIzaSyDq_LECOrc4SY90SyDsBQGmwl-YnUNFIj8",
+            authDomain: "xiangqi-sq.firebaseapp.com",
+            databaseURL: "https://xiangqi-sq-default-rtdb.asia-southeast1.firebasedatabase.app",
+            projectId: "xiangqi-sq",
+            storageBucket: "xiangqi-sq.firebasestorage.app",
+            messagingSenderId: "351923336298",
+            appId: "1:351923336298:web:e7278ea095ba085ac4935b"
         };
-        this.fb = initializeApp(config); 
-        this.auth = getAuth(this.fb); 
-        this.db = getFirestore(this.fb); 
+        this.fb = initializeApp(config);
+        this.auth = getAuth(this.fb);
+        this.db = getFirestore(this.fb);
+        this.rtdb = getDatabase(this.fb); // Realtime Database for presence
         this.appId = 'sg-xiangqi';
         
         const params = new URLSearchParams(window.location.search);
@@ -47,6 +50,7 @@ export class XQApp {
         this.myPieceStyle = 'ivory'; // Default piece style
         this.myBoardStyle = 'classic'; // Default board style
         this.myEnvironmentBg = 'forest'; // Default environment background
+        this.presenceRef = null; // Realtime Database presence reference
 
         // Sound system - using simple tone generation for now (can replace with real sounds later)
         this.sounds = {
@@ -126,6 +130,7 @@ export class XQApp {
         this.timerTickCount = 0; // Track seconds elapsed for optimized syncing
         this.lastMoveTime = Date.now(); // Track when last move was made for time calculation
         this.turnStartTime = Date.now(); // Track when current turn started
+        this.timersInitialized = false; // Track if timers have been initialized for mid-game join
 
         this.hasJoined = false;
         window.addEventListener('beforeunload', () => this.leaveRoom());
@@ -237,6 +242,9 @@ export class XQApp {
                     }
 
                     this.hasJoined = true;
+
+                    // Set up presence tracking in Realtime Database
+                    await this.setupPresenceTracking();
                 }
 
                 this.syncTable();
@@ -319,20 +327,40 @@ export class XQApp {
     }
 
     formatTime(seconds) {
+        console.log('🕐 formatTime called with seconds:', seconds);
         const hrs = Math.floor(seconds / 3600);
         const mins = Math.floor((seconds % 3600) / 60);
         const secs = seconds % 60;
-        return `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+        const formatted = `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+        console.log('🕐 formatTime returning:', formatted);
+        return formatted;
     }
 
     updateTimerDisplay() {
+        console.log('⏱️ updateTimerDisplay called - redTimeLeft:', this.redTimeLeft, 'blackTimeLeft:', this.blackTimeLeft);
+
         const redTimerEl = document.getElementById('red-timer');
         const blackTimerEl = document.getElementById('black-timer');
         const redCard = document.getElementById('player-card-red');
         const blackCard = document.getElementById('player-card-black');
 
-        if (redTimerEl) redTimerEl.innerText = this.formatTime(this.redTimeLeft);
-        if (blackTimerEl) blackTimerEl.innerText = this.formatTime(this.blackTimeLeft);
+        console.log('⏱️ Timer elements found:', {
+            redTimerEl: !!redTimerEl,
+            blackTimerEl: !!blackTimerEl,
+            redDisplay: redTimerEl?.style.display,
+            blackDisplay: blackTimerEl?.style.display
+        });
+
+        if (redTimerEl) {
+            const formattedRed = this.formatTime(this.redTimeLeft);
+            redTimerEl.innerText = formattedRed;
+            console.log('⏱️ RED timer set to:', formattedRed, 'actual innerText:', redTimerEl.innerText);
+        }
+        if (blackTimerEl) {
+            const formattedBlack = this.formatTime(this.blackTimeLeft);
+            blackTimerEl.innerText = formattedBlack;
+            console.log('⏱️ BLACK timer set to:', formattedBlack, 'actual innerText:', blackTimerEl.innerText);
+        }
 
         // Add stress animation when time is running low (under 1 minute = 60 seconds)
         if (redCard) {
@@ -358,6 +386,9 @@ export class XQApp {
             clearInterval(this.timerInterval);
             this.timerInterval = null;
         }
+
+        // Reset initialization flag for new game
+        this.timersInitialized = true; // Mark as initialized since startTimer sets it up
 
         console.log('⏱️ Starting timer...');
 
@@ -389,9 +420,58 @@ export class XQApp {
         // Store increment for later use
         this.timeIncrement = increment;
 
-        // Reset timers using region's time control
-        this.redTimeLeft = baseTime * 60;
-        this.blackTimeLeft = baseTime * 60;
+        // Calculate actual time remaining from move history (for observers/rejoining players)
+        if (this.gameState && this.gameState.history && this.gameState.history.length > 0) {
+            console.log('⏱️ Calculating time from move history for observer/rejoining player...');
+
+            // Start with base time
+            let redTime = baseTime * 60;
+            let blackTime = baseTime * 60;
+
+            // Get last move time
+            const lastMove = this.gameState.history[this.gameState.history.length - 1];
+            const lastMoveTime = lastMove.ts || Date.now();
+
+            // Calculate time used per player
+            this.gameState.history.forEach((move, index) => {
+                if (index === 0) return; // Skip first move (no previous move to calculate from)
+
+                const prevMove = this.gameState.history[index - 1];
+                const timeSpent = Math.floor((move.ts - prevMove.ts) / 1000);
+
+                // Subtract time spent by the player who made THIS move
+                if (move.piece) {
+                    const isRed = move.piece === move.piece.toUpperCase();
+                    if (isRed) {
+                        redTime = redTime - timeSpent + increment;
+                    } else {
+                        blackTime = blackTime - timeSpent + increment;
+                    }
+                }
+            });
+
+            // Account for time elapsed since last move for current player
+            const now = Date.now();
+            const elapsedSinceLastMove = Math.floor((now - lastMoveTime) / 1000);
+
+            if (this.gameState.turn === 'red') {
+                redTime -= elapsedSinceLastMove;
+            } else {
+                blackTime -= elapsedSinceLastMove;
+            }
+
+            // Ensure times don't go negative
+            this.redTimeLeft = Math.max(0, redTime);
+            this.blackTimeLeft = Math.max(0, blackTime);
+
+            console.log(`⏱️ Calculated times: Red=${this.redTimeLeft}s, Black=${this.blackTimeLeft}s`);
+        } else {
+            // New game - use base time
+            console.log('⏱️ New game - using base time');
+            this.redTimeLeft = baseTime * 60;
+            this.blackTimeLeft = baseTime * 60;
+        }
+
         this.updateTimerDisplay();
 
         // Store turn start time for local calculation
@@ -436,47 +516,64 @@ export class XQApp {
         }, 1000);
     }
 
-    startTimerInterval() {
-        // Start ONLY the interval, without initialization
-        // This is called when turn changes
-        console.log('⏱️ Starting LOCAL timer interval (no Firebase sync)...');
+    startTimerDisplay() {
+        // Display timer that reads from Firebase (source of truth)
+        console.log('⏱️ Starting timer DISPLAY (reads from Firebase every second)');
 
-        // Stop any existing interval first
+        // Stop any existing interval
         if (this.timerInterval) {
             clearInterval(this.timerInterval);
-            this.timerInterval = null;
         }
 
-        // Reset tick counter
-        this.timerTickCount = 0;
-
-        // LOCAL TIMER: Runs on ALL clients independently (no Firebase sync!)
-        this.timerInterval = setInterval(() => {
+        // Display update interval - reads from Firebase and calculates display time
+        this.timerInterval = setInterval(async () => {
             if (!this.gameState || this.gameState.status !== 'playing') {
                 this.stopTimer();
                 return;
             }
 
-            // Decrement the timer for whoever's turn it is
-            if (this.gameState.turn === 'red') {
-                this.redTimeLeft--;
-                if (this.redTimeLeft <= 0) {
-                    this.redTimeLeft = 0;
-                    this.handleTimeout('red');
+            try {
+                // Read timer values from Firebase (SOURCE OF TRUTH)
+                const gameRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'games', this.tid);
+                const gameSnap = await getDoc(gameRef);
+                const gameData = gameSnap.data();
+
+                if (!gameData || !gameData.timerStarted) {
+                    // Timer not initialized yet
                     return;
                 }
-            } else {
-                this.blackTimeLeft--;
-                if (this.blackTimeLeft <= 0) {
-                    this.blackTimeLeft = 0;
-                    this.handleTimeout('black');
-                    return;
+
+                // Calculate elapsed time since last update
+                const now = Date.now();
+                const lastUpdate = gameData.lastTimerUpdate || now;
+                const elapsedSeconds = Math.floor((now - lastUpdate) / 1000);
+
+                // Calculate display time (Firebase value minus elapsed for current player)
+                let displayRedTime = gameData.redTimeLeft || 0;
+                let displayBlackTime = gameData.blackTimeLeft || 0;
+
+                if (this.gameState.turn === 'red') {
+                    displayRedTime = Math.max(0, displayRedTime - elapsedSeconds);
+                    if (displayRedTime <= 0) {
+                        this.handleTimeout('red');
+                        return;
+                    }
+                } else {
+                    displayBlackTime = Math.max(0, displayBlackTime - elapsedSeconds);
+                    if (displayBlackTime <= 0) {
+                        this.handleTimeout('black');
+                        return;
+                    }
                 }
+
+                // Update local display values
+                this.redTimeLeft = displayRedTime;
+                this.blackTimeLeft = displayBlackTime;
+
+                this.updateTimerDisplay();
+            } catch (err) {
+                console.error('❌ Error reading timer from Firebase:', err);
             }
-
-            this.updateTimerDisplay();
-
-            // console.log(`⏱️ LOCAL timer tick: Red=${this.redTimeLeft}s, Black=${this.blackTimeLeft}s, Turn=${this.gameState.turn}`);
         }, 1000);
     }
 
@@ -716,30 +813,32 @@ export class XQApp {
             showInGameControls: gameIsPlaying && iAmSeated
         });
 
+        // FIX: Show/hide timers based on game status (not seating status)
+        const redTimerEl = document.getElementById('red-timer');
+        const blackTimerEl = document.getElementById('black-timer');
+
+        if (gameIsPlaying) {
+            // Game is active - show timers for EVERYONE (players and observers)
+            if (redTimerEl) redTimerEl.style.display = 'block';
+            if (blackTimerEl) blackTimerEl.style.display = 'block';
+        } else {
+            // Game not active - hide timers
+            if (redTimerEl) redTimerEl.style.display = 'none';
+            if (blackTimerEl) blackTimerEl.style.display = 'none';
+        }
+
         if (gameIsPlaying && iAmSeated) {
-            // Game is active - hide UNSEAT, show RESIGN and OFFER DRAW
+            // Game is active AND I'm seated - hide UNSEAT, show RESIGN and OFFER DRAW
             console.log('✅ Showing RESIGN and OFFER DRAW buttons');
             if (btnUnseat) btnUnseat.style.display = 'none';
             if (btnResign) btnResign.style.display = 'block';
             if (btnDraw) btnDraw.style.display = 'block';
-
-            // Also ensure timers are visible during active game
-            const redTimerEl = document.getElementById('red-timer');
-            const blackTimerEl = document.getElementById('black-timer');
-            if (redTimerEl) redTimerEl.style.display = 'block';
-            if (blackTimerEl) blackTimerEl.style.display = 'block';
         } else {
-            // Game not active - show UNSEAT (if seated), hide RESIGN and OFFER DRAW
+            // Game not active OR I'm an observer - hide RESIGN and OFFER DRAW
             console.log('❌ Hiding RESIGN and OFFER DRAW buttons');
             if (btnResign) btnResign.style.display = 'none';
             if (btnDraw) btnDraw.style.display = 'none';
             // btnUnseat visibility is already controlled by updateSeatingButtons
-
-            // Hide timers when game is not active
-            const redTimerEl = document.getElementById('red-timer');
-            const blackTimerEl = document.getElementById('black-timer');
-            if (redTimerEl) redTimerEl.style.display = 'none';
-            if (blackTimerEl) blackTimerEl.style.display = 'none';
         }
     }
 
@@ -829,13 +928,39 @@ export class XQApp {
                 timestamp: Date.now()
             });
 
-            // Detect battle start: Show splash screen for EVERYONE when game status changes to 'playing'
-            // IMPORTANT: Only show if previous status was explicitly NOT 'playing' (avoid showing on page load)
+            // Detect battle start: Initialize timer when game status changes to 'playing'
+            // IMPORTANT: Only initialize if previous status was explicitly NOT 'playing' (avoid re-initializing on page load)
             const battleJustStarted = g.status === 'playing' && this.previousGameStatus !== null && this.previousGameStatus !== 'playing';
             if (battleJustStarted) {
-                console.log('⚔️ Battle just started! Showing splash for everyone...');
-                this.showBattleSplash();
-                // Timer will start automatically after splash ends (in showBattleSplash)
+                console.log('⚔️ Battle just started! Initializing timer in Firebase...');
+
+                // Initialize timer immediately (no splash screen delay)
+                const iAmRed = this.table?.playerRed?.uid === this.user?.uid;
+
+                if (iAmRed) {
+                    console.log('⏱️🔴 I am RED - initializing timer in Firebase');
+
+                    // Get time control
+                    const regionRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'regions', this.rid);
+                    getDoc(regionRef).then(regionSnap => {
+                        const baseTime = (regionSnap.data()?.baseTime || 15) * 60;
+
+                        const gameRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'games', this.tid);
+                        setDoc(gameRef, {
+                            redTimeLeft: baseTime,
+                            blackTimeLeft: baseTime,
+                            lastTimerUpdate: Date.now(),
+                            timerStarted: true
+                        }, { merge: true }).then(() => {
+                            console.log(`⏱️✅ Timer initialized: ${baseTime}s each`);
+                        });
+                    });
+                } else {
+                    console.log('⏱️⚫ I am BLACK or Observer - waiting for RED to initialize timer');
+                }
+
+                // All clients start display update immediately
+                this.startTimerDisplay();
             }
 
             // Update previous status for next comparison (set to null on first load if no previous status)
@@ -898,6 +1023,24 @@ export class XQApp {
 
             // Update timer display and stress animation
             if (g.status === 'playing') {
+                // FIX: Ensure timers are visible and initialized for observers joining mid-game
+                const redTimerEl = document.getElementById('red-timer');
+                const blackTimerEl = document.getElementById('black-timer');
+
+                // ALWAYS show timers when game is playing
+                if (redTimerEl) redTimerEl.style.display = 'block';
+                if (blackTimerEl) blackTimerEl.style.display = 'block';
+
+                console.log('🔍 Timer check:', {
+                    redTimerExists: !!redTimerEl,
+                    redTimerDisplay: redTimerEl?.style.display,
+                    redTimeLeft: this.redTimeLeft,
+                    blackTimeLeft: this.blackTimeLeft,
+                    timersInitialized: this.timersInitialized
+                });
+
+                // Just update the display - timers are managed by startTimer() and the interval
+
                 this.updateTimerDisplay();
             }
 
@@ -1063,7 +1206,28 @@ export class XQApp {
                 console.log('📋 Display board first row:', displayBoard[0]);
                 console.log('📋 Display board last row:', displayBoard[9]);
 
-                this.ui.renderPieces(displayBoard, this.engine.labels, (x, y) => this.handlePieceClick(x, y), this.myPieceStyle);
+                // Transform lastMove coordinates if board is rotated for black player
+                let displayLastMove = g.lastMove;
+                if (iAmBlack && g.lastMove && g.lastMove.to) {
+                    displayLastMove = {
+                        ...g.lastMove,
+                        to: {
+                            x: 8 - g.lastMove.to.x,
+                            y: 9 - g.lastMove.to.y
+                        }
+                    };
+                }
+
+                // Transform selectedPiece coordinates if board is rotated for black player
+                let displaySelectedPiece = this.selectedPiece;
+                if (iAmBlack && this.selectedPiece) {
+                    displaySelectedPiece = {
+                        x: 8 - this.selectedPiece.x,
+                        y: 9 - this.selectedPiece.y
+                    };
+                }
+
+                this.ui.renderPieces(displayBoard, this.engine.labels, (x, y) => this.handlePieceClick(x, y), this.myPieceStyle, displayLastMove, displaySelectedPiece);
             } else {
                 console.log('⏸️ Game not active, clearing board');
                 const layer = document.getElementById('pieces-layer');
@@ -1658,9 +1822,122 @@ export class XQApp {
 
         // Stop music when I leave (will be stopped by occupants change too, but this is immediate)
         this.stopAmbientMusic();
+
+        // Remove from Realtime Database presence
+        if (this.presenceRef) {
+            await remove(this.presenceRef);
+            console.log('🔌 Removed from Realtime Database presence');
+        }
+    }
+
+    async setupPresenceTracking() {
+        console.log('🔌 Setting up presence tracking in Realtime Database');
+
+        // Create a reference in Realtime Database for this user in this table
+        this.presenceRef = ref(this.rtdb, `presence/${this.rid}/${this.tid}/${this.user.uid}`);
+
+        const presenceData = {
+            uid: this.user.uid,
+            name: this.profile?.playerName || this.user.email.split('@')[0],
+            avatar: this.profile?.avatarUrl || '/lobby/1.JPG',
+            elo: this.profile?.elo || 1200,
+            coins: this.profile?.coins || 0,
+            connectedAt: Date.now()
+        };
+
+        // Set presence data
+        await set(this.presenceRef, presenceData);
+
+        // Set up automatic removal on disconnect
+        onDisconnect(this.presenceRef).remove();
+
+        console.log('✅ Presence tracking set up with auto-disconnect removal');
+
+        // Listen to ALL presence changes for this table and sync to Firestore
+        this.listenToPresenceChanges();
+    }
+
+    listenToPresenceChanges() {
+        const tablePresenceRef = ref(this.rtdb, `presence/${this.rid}/${this.tid}`);
+
+        onValue(tablePresenceRef, async (snapshot) => {
+            console.log('👂 Presence change detected in Realtime Database');
+
+            const presenceData = snapshot.val();
+            const onlineUsers = presenceData ? Object.values(presenceData) : [];
+
+            console.log('🔌 Online users from RTDB:', onlineUsers.length, onlineUsers.map(u => u.name));
+
+            // Sync to Firestore occupants array
+            const tRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'regions', this.rid, 'tables', this.tid);
+
+            try {
+                await runTransaction(this.db, async (transaction) => {
+                    const tableDoc = await transaction.get(tRef);
+                    if (!tableDoc.exists()) {
+                        console.log('❌ Table no longer exists');
+                        return;
+                    }
+
+                    const tableData = tableDoc.data();
+                    const currentOccupants = tableData.occupants || [];
+
+                    // Build new occupants list from RTDB presence (source of truth)
+                    const newOccupants = onlineUsers.map(u => ({
+                        uid: u.uid,
+                        name: u.name,
+                        elo: u.elo,
+                        coins: u.coins,
+                        avatar: u.avatar
+                    }));
+
+                    // Only update if changed
+                    const currentUIDs = currentOccupants.map(o => o.uid).sort().join(',');
+                    const newUIDs = newOccupants.map(o => o.uid).sort().join(',');
+
+                    if (currentUIDs !== newUIDs) {
+                        console.log('🔄 Syncing Firestore occupants with RTDB presence');
+                        console.log('  Before:', currentOccupants.length, 'occupants');
+                        console.log('  After:', newOccupants.length, 'occupants');
+
+                        transaction.update(tRef, { occupants: newOccupants });
+
+                        // If room is now completely empty, clean up chat
+                        if (newOccupants.length === 0) {
+                            console.log('🧹 Room is now empty - cleaning up chat');
+                            const gRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'games', this.tid);
+                            transaction.update(gRef, {
+                                chat: [],
+                                board: null,
+                                status: 'waiting',
+                                history: [],
+                                moveHistory: [],
+                                turn: 'red'
+                            });
+                            transaction.update(tRef, { matchActive: false });
+                        }
+                    } else {
+                        console.log('✅ Occupants already in sync');
+                    }
+                });
+            } catch (err) {
+                console.error('❌ Error syncing presence to Firestore:', err);
+            }
+        });
     }
 
     async handleExit() {
+        // Check if user is a player in an active game
+        const iAmRed = this.table?.playerRed?.uid === this.user?.uid;
+        const iAmBlack = this.table?.playerBlack?.uid === this.user?.uid;
+        const isPlaying = this.gameState?.status === 'playing';
+
+        if ((iAmRed || iAmBlack) && isPlaying) {
+            // User is a player in an active game - automatically resign
+            console.log('🚪 Player leaving during active game - auto-resigning');
+            await this.resign();
+        }
+
         await this.leaveRoom();
         window.location.href = '../lobby/lobby.html';
     }
@@ -1710,52 +1987,6 @@ export class XQApp {
         await this.engageBattle();
     }
 
-    showBattleSplash() {
-        console.log('🎬 Showing battle splash screen...');
-
-        const splash = document.getElementById('battle-splash');
-        if (!splash) return;
-
-        // Show splash screen
-        splash.classList.add('active');
-
-        // Play Chinese voice using Web Speech API with intense tone
-        if ('speechSynthesis' in window) {
-            // Cancel any ongoing speech
-            window.speechSynthesis.cancel();
-
-            const utterance = new SpeechSynthesisUtterance('即分高下，也决生死！');
-            utterance.lang = 'zh-CN'; // Chinese (Simplified)
-            utterance.rate = 0.9; // Slightly slower for dramatic effect
-            utterance.pitch = 0.8; // Lower pitch for intensity
-            utterance.volume = 1.0; // Maximum volume
-
-            // Try to find a male Chinese voice
-            const voices = window.speechSynthesis.getVoices();
-            const chineseVoice = voices.find(voice =>
-                voice.lang.startsWith('zh') && voice.name.toLowerCase().includes('male')
-            ) || voices.find(voice => voice.lang.startsWith('zh'));
-
-            if (chineseVoice) {
-                utterance.voice = chineseVoice;
-                console.log('🎤 Using voice:', chineseVoice.name);
-            }
-
-            window.speechSynthesis.speak(utterance);
-        }
-
-        // Hide splash after 5 seconds
-        setTimeout(() => {
-            splash.classList.remove('active');
-            console.log('🎬 Battle splash hidden');
-
-            // Start timer after splash ends
-            if (!this.timerInterval && this.gameState?.status === 'playing') {
-                console.log('⏱️ Starting timer after splash screen...');
-                this.startTimer();
-            }
-        }, 5000);
-    }
 
     async engageBattle() {
         console.log('⚔️ Engaging battle...');
@@ -1844,13 +2075,19 @@ export class XQApp {
             return;
         }
 
-        // If clicking own piece - select it
+        // If clicking own piece - select it or deselect if clicking the same piece
         if (piece) {
             const isRed = piece === piece.toUpperCase();
             const pieceColor = isRed ? 'red' : 'black';
 
             if (pieceColor === myColor) {
-                this.selectPiece(actualX, actualY);
+                // Check if clicking the same piece (deselect)
+                if (this.selectedPiece && this.selectedPiece.x === actualX && this.selectedPiece.y === actualY) {
+                    this.deselectPiece();
+                } else {
+                    // Selecting a different piece of the same color
+                    this.selectPiece(actualX, actualY);
+                }
             } else {
                 this.showStatus("That's not your piece!", "red");
             }
@@ -1871,7 +2108,7 @@ export class XQApp {
         const displayMoves = iAmBlack
             ? this.validMoves.map(m => ({ x: 8 - m.x, y: 9 - m.y }))
             : this.validMoves;
-        
+
         // Render hints using display coordinates
         const hintsLayer = document.getElementById('hints-layer');
         if (hintsLayer) {
@@ -1883,6 +2120,22 @@ export class XQApp {
                 return `<div class="move-hint" style="left:${hintX}%; top:${hintY}%;" onclick="app.executeMove(${originalMove.x}, ${originalMove.y})"></div>`;
             }).join('');
         }
+
+        // Re-render pieces to show the selected piece highlight
+        this.renderBoard();
+    }
+
+    deselectPiece() {
+        console.log('🔓 Deselecting piece');
+        this.selectedPiece = null;
+        this.validMoves = [];
+
+        // Clear hints
+        const hintsLayer = document.getElementById('hints-layer');
+        if (hintsLayer) hintsLayer.innerHTML = "";
+
+        // Re-render to remove highlight
+        this.renderBoard();
     }
 
     async executeMove(toX, toY) {
@@ -2000,21 +2253,47 @@ export class XQApp {
         }
         // NOTE: Check animation will also be triggered by Firebase sync
 
+        // CRITICAL: Calculate and save timer values to Firebase (SOURCE OF TRUTH)
+        const now = Date.now();
+        const gameSnap = await getDoc(gameRef);
+        const currentGameData = gameSnap.data();
+
+        const lastUpdate = currentGameData?.lastTimerUpdate || now;
+        const elapsedSeconds = Math.floor((now - lastUpdate) / 1000);
+
+        // Get increment from region
+        const regionRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'regions', this.rid);
+        const regionSnap = await getDoc(regionRef);
+        const increment = regionSnap.data()?.increment || 0;
+
+        // Calculate new timer values
+        let newRedTime = currentGameData?.redTimeLeft || 900;
+        let newBlackTime = currentGameData?.blackTimeLeft || 900;
+
+        // Deduct time from player who just moved, add increment
+        if (this.gameState.turn === 'red') {
+            newRedTime = Math.max(0, newRedTime - elapsedSeconds + increment);
+        } else {
+            newBlackTime = Math.max(0, newBlackTime - elapsedSeconds + increment);
+        }
+
+        console.log(`⏱️ FIREBASE TIMER UPDATE: Red=${newRedTime}s, Black=${newBlackTime}s, Elapsed=${elapsedSeconds}s, Increment=${increment}s`);
+
         const updateData = {
             board: flatBoard,
             turn: nextTurn,
             lastMove: moveData,
             history: arrayUnion(moveData),
-            moveHistory: arrayUnion(moveRecord) // Track board positions for repetition detection
+            moveHistory: arrayUnion(moveRecord), // Track board positions for repetition detection
+            redTimeLeft: newRedTime,
+            blackTimeLeft: newBlackTime,
+            lastTimerUpdate: now
         };
 
         if (newStatus !== 'playing') {
             updateData.status = newStatus;
             if (winner) updateData.winner = winner;
         }
-
-        // NO TIMER SYNC - timers are purely local now
-        // Time increments are handled locally via move timestamps
 
         await setDoc(gameRef, updateData, { merge: true });
 
@@ -2150,8 +2429,11 @@ export class XQApp {
 
         if (!modal) return;
 
-        // Only show if I'm receiving the offer (not the one who sent it)
-        const iAmReceiver = drawOffer && drawOffer.from !== this.user?.uid;
+        // FIX: Only show if I'm the seated opponent receiving the offer
+        const iAmRed = this.table?.playerRed?.uid === this.user?.uid;
+        const iAmBlack = this.table?.playerBlack?.uid === this.user?.uid;
+        const iAmSeated = iAmRed || iAmBlack;
+        const iAmReceiver = drawOffer && drawOffer.from !== this.user?.uid && iAmSeated;
 
         if (iAmReceiver) {
             // Show modal
@@ -2208,8 +2490,11 @@ export class XQApp {
 
         if (!modal) return;
 
-        // Only show if I'm receiving the request (not the one who sent it)
-        const iAmReceiver = battleRequest && battleRequest.from !== this.user?.uid;
+        // Only show if I'm the seated opponent receiving the request (not the requester and not an observer)
+        const iAmRed = this.table?.playerRed?.uid === this.user?.uid;
+        const iAmBlack = this.table?.playerBlack?.uid === this.user?.uid;
+        const iAmSeated = iAmRed || iAmBlack;
+        const iAmReceiver = battleRequest && battleRequest.from !== this.user?.uid && iAmSeated;
 
         if (iAmReceiver) {
             // Show modal
