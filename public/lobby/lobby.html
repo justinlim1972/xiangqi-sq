@@ -159,7 +159,7 @@
 <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
     import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-    import { getFirestore, collection, doc, onSnapshot, query, orderBy, updateDoc, deleteField, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+    import { getFirestore, collection, doc, onSnapshot, query, orderBy, updateDoc, deleteField, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
     const firebaseConfig = { apiKey: "AIzaSyDq_LECOrc4SY90SyDsBQGmwl-YnUNFIj8", authDomain: "xiangqi-sq.firebaseapp.com", projectId: "xiangqi-sq", storageBucket: "xiangqi-sq.firebasestorage.app", messagingSenderId: "351923336298", appId: "1:351923336298:web:e7278ea095ba085ac4935b" };
     const app = initializeApp(firebaseConfig); const auth = getAuth(app); const db = getFirestore(app); const appId = "sg-xiangqi";
@@ -171,9 +171,19 @@
         try { await signOut(auth); window.location.href = window.location.origin + '/index.html'; } catch (e) {}
     };
 
-    onAuthStateChanged(auth, (user) => {
+    onAuthStateChanged(auth, async (user) => {
         if (!user) window.location.href = window.location.origin + '/index.html';
         else {
+            // Update lastSeen timestamp when user enters lobby
+            try {
+                const profileRef = doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'data');
+                await updateDoc(profileRef, {
+                    lastSeen: Date.now()
+                });
+            } catch (err) {
+                console.log('Could not update lastSeen:', err);
+            }
+
             onSnapshot(doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'data'), (snap) => {
                 if (snap.exists()) {
                     const d = snap.data();

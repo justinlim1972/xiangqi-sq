@@ -787,14 +787,64 @@
 
     async function loadUserManagement() {
         try {
-            // Build user data from table information (public data only)
+            console.log('🔍 Loading user management data...');
+
+            // Step 1: Load ALL users from the users collection
             const userMap = new Map();
-            const regionsRef = collection(db, 'artifacts', appId, 'public', 'data', 'regions');
-            const regionsSnap = await getDocs(regionsRef);
+            const currentUser = auth.currentUser;
+
+            if (!currentUser) {
+                console.error('No current user!');
+                return;
+            }
+
+            // Get all user profiles from artifacts/sg-xiangqi/users/*/profile/data
+            // Note: This requires Firestore rules to allow admins to list users
+            const usersCollectionRef = collection(db, 'artifacts', appId, 'users');
+            let usersSnapshot;
+
+            try {
+                usersSnapshot = await getDocs(usersCollectionRef);
+                console.log(`📊 Found ${usersSnapshot.size} user documents in collection`);
+            } catch (err) {
+                console.error('❌ Cannot read users collection:', err);
+                alert('Cannot read users collection. This may be a permissions issue. Please check Firestore rules.');
+                return;
+            }
 
             const now = Date.now();
 
-            // First pass: Collect all user data from tables
+            // Load each user's profile data
+            for (const userDoc of usersSnapshot.docs) {
+                const uid = userDoc.id;
+                try {
+                    const profileRef = doc(db, 'artifacts', appId, 'users', uid, 'profile', 'data');
+                    const profileSnap = await getDoc(profileRef);
+
+                    if (profileSnap.exists()) {
+                        const profile = profileSnap.data();
+                        userMap.set(uid, {
+                            uid,
+                            email: profile.email || 'N/A',
+                            playerName: profile.playerName || 'Anonymous',
+                            role: profile.role || 'user',
+                            lastSeen: profile.lastSeen || 0,
+                            gamesPlayed: 0,
+                            lastTable: '-',
+                            currentTable: null
+                        });
+                    }
+                } catch (err) {
+                    console.log(`Cannot read profile for user ${uid}:`, err.message);
+                }
+            }
+
+            console.log(`✅ Loaded ${userMap.size} user profiles`);
+
+            // Step 2: Check who's currently online (seated at tables)
+            const regionsRef = collection(db, 'artifacts', appId, 'public', 'data', 'regions');
+            const regionsSnap = await getDocs(regionsRef);
+
             for (const regionDoc of regionsSnap.docs) {
                 const tablesRef = collection(db, 'artifacts', appId, 'public', 'data', 'regions', regionDoc.id, 'tables');
                 const tablesSnap = await getDocs(tablesRef);
@@ -802,61 +852,23 @@
                 for (const tableDoc of tablesSnap.docs) {
                     const table = tableDoc.data();
 
-                    // Process Red Player
-                    if (table.playerRed?.uid) {
-                        const uid = table.playerRed.uid;
-                        if (!userMap.has(uid)) {
-                            userMap.set(uid, {
-                                uid,
-                                email: table.playerRed.email || 'N/A',
-                                playerName: table.playerRed.playerName || 'Anonymous',
-                                role: 'user', // Default role
-                                lastSeen: 0,
-                                gamesPlayed: 0,
-                                lastTable: '-',
-                                currentTable: null
-                            });
-                        }
-
-                        const userData = userMap.get(uid);
-
-                        // Check if currently seated
-                        if (table.status === 'waiting' || table.status === 'playing') {
-                            userData.currentTable = tableDoc.id;
-                            userData.lastSeen = now;
-                        }
+                    // Check Red Player
+                    if (table.playerRed?.uid && userMap.has(table.playerRed.uid)) {
+                        const userData = userMap.get(table.playerRed.uid);
+                        userData.currentTable = tableDoc.id;
+                        userData.lastSeen = now;
                     }
 
-                    // Process Black Player
-                    if (table.playerBlack?.uid) {
-                        const uid = table.playerBlack.uid;
-                        if (!userMap.has(uid)) {
-                            userMap.set(uid, {
-                                uid,
-                                email: table.playerBlack.email || 'N/A',
-                                playerName: table.playerBlack.playerName || 'Anonymous',
-                                role: 'user', // Default role
-                                lastSeen: 0,
-                                gamesPlayed: 0,
-                                lastTable: '-',
-                                currentTable: null
-                            });
-                        }
-
-                        const userData = userMap.get(uid);
-
-                        // Check if currently seated
-                        if (table.status === 'waiting' || table.status === 'playing') {
-                            userData.currentTable = tableDoc.id;
-                            userData.lastSeen = now;
-                        }
+                    // Check Black Player
+                    if (table.playerBlack?.uid && userMap.has(table.playerBlack.uid)) {
+                        const userData = userMap.get(table.playerBlack.uid);
+                        userData.currentTable = tableDoc.id;
+                        userData.lastSeen = now;
                     }
                 }
             }
 
-            console.log(`Found ${userMap.size} unique users from tables`);
-
-            // Second pass: Count games played
+            // Step 3: Count games played (from game history)
             for (const regionDoc of regionsSnap.docs) {
                 const tablesRef = collection(db, 'artifacts', appId, 'public', 'data', 'regions', regionDoc.id, 'tables');
                 const tablesSnap = await getDocs(tablesRef);
@@ -867,7 +879,6 @@
                     // Check both players
                     for (const player of [table.playerRed, table.playerBlack]) {
                         if (player?.uid && userMap.has(player.uid)) {
-                            // Get game data to check if any moves were made
                             try {
                                 const gameRef = doc(db, 'artifacts', appId, 'public', 'data', 'games', tableDoc.id);
                                 const gameSnap = await getDoc(gameRef);
@@ -894,38 +905,6 @@
                         }
                     }
                 }
-            }
-
-            // Try to fetch role information for current admin user (if they have permission)
-            try {
-                const currentUser = auth.currentUser;
-                if (currentUser) {
-                    const adminProfileRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'profile', 'data');
-                    const adminProfileSnap = await getDoc(adminProfileRef);
-
-                    if (adminProfileSnap.exists()) {
-                        const adminProfile = adminProfileSnap.data();
-
-                        // If current user is admin, try to fetch role info for all users
-                        if (adminProfile.role === 'admin') {
-                            for (const [uid, userData] of userMap) {
-                                try {
-                                    const profileRef = doc(db, 'artifacts', appId, 'users', uid, 'profile', 'data');
-                                    const profileSnap = await getDoc(profileRef);
-
-                                    if (profileSnap.exists()) {
-                                        const profile = profileSnap.data();
-                                        userData.role = profile.role || 'user';
-                                    }
-                                } catch (err) {
-                                    console.log(`Cannot read profile for user ${uid} - using default role`);
-                                }
-                            }
-                        }
-                    }
-                }
-            } catch (err) {
-                console.log('Cannot verify admin status or read user roles - showing default roles only');
             }
 
             const users = Array.from(userMap.values());
