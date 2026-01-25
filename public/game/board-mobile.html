@@ -2,22 +2,10 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SG Xiangqi - General's Arena</title>
-
-    <!-- Mobile Device Detection & Redirect -->
-    <script>
-        (function() {
-            const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth <= 768;
-            const forceDesktop = new URLSearchParams(window.location.search).get('desktop') === 'true';
-
-            if (isMobile && !forceDesktop && !window.location.pathname.includes('board-mobile.html')) {
-                const currentUrl = new URL(window.location.href);
-                currentUrl.pathname = currentUrl.pathname.replace('board.html', 'board-mobile.html');
-                window.location.href = currentUrl.toString();
-            }
-        })();
-    </script>
+    <meta name="viewport" content="width=device-width, initial-scale=0.75, minimum-scale=0.5, maximum-scale=3.0, user-scalable=yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <title>SG Xiangqi - Mobile</title>
 
     <style>
         :root {
@@ -25,17 +13,23 @@
             --panel-bg: #111; --hint: rgba(34, 197, 94, 0.4);
             --board-line: #5d2e0c;
         }
-        body { 
-            margin: 0; background: var(--dark); color: #eee; 
-            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; 
-            display: flex; height: 100vh; overflow: hidden; 
+        /* === MOBILE OPTIMIZED LAYOUT === */
+        body {
+            margin: 0; background: var(--dark); color: #eee;
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            display: flex; flex-direction: column;
+            height: 100vh; overflow: hidden;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation; /* Allow pinch zoom */
         }
-        
-        /* THE STAGE */
-        main { 
-            flex-grow: 1; position: relative; display: flex; 
-            align-items: center; justify-content: center; background: #000; 
-            overflow: hidden;
+
+        /* THE STAGE - Optimized for landscape with zoom support */
+        main {
+            flex: 1; position: relative; display: flex;
+            align-items: center; justify-content: center; background: #000;
+            overflow: auto; /* Changed from hidden to auto for zooming */
+            min-height: 0;
+            touch-action: pinch-zoom pan-x pan-y; /* Enable pinch-to-zoom */
         }
 
         /* ATMOSPHERIC BACKGROUND */
@@ -46,12 +40,14 @@
             filter: brightness(1.0) blur(2px); z-index: 1;
         }
 
+        /* Board optimized for mobile (smaller border, better fit) */
         .board-container {
-            position: relative; z-index: 5; 
-            width: 85vh; max-width: 95vw;
-            aspect-ratio: 10/11; border: 12px solid #2a1a10;
-            background: #dcb35c; 
-            box-shadow: 0 40px 100px rgba(0,0,0,0.9), 0 0 20px rgba(241, 196, 15, 0.2);
+            position: relative; z-index: 5;
+            width: min(85vmin, 95vw);
+            aspect-ratio: 10/11;
+            border: 6px solid #2a1a10;
+            background: #dcb35c;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.9), 0 0 15px rgba(241, 196, 15, 0.2);
             border-radius: 4px;
         }
 
@@ -154,11 +150,22 @@
             pointer-events: auto;
         }
 
-        /* SIDEBAR INTERFACE */
-        #sidebar { 
-            width: 380px; background: var(--panel-bg); 
-            border-left: 2px solid #222; display: flex; 
-            flex-direction: column; z-index: 100; flex-shrink: 0;
+        /* SIDEBAR - Mobile optimized (bottom panel) */
+        #sidebar {
+            width: 100%; height: 40vh; background: var(--panel-bg);
+            border-top: 2px solid #222; display: flex;
+            flex-direction: column; z-index: 100;
+            flex-shrink: 0; overflow: hidden;
+            position: relative;
+        }
+
+        /* Sidebar content wrapper - takes remaining space and allows scrolling */
+        .sidebar-content-wrapper {
+            flex: 1;
+            overflow-y: auto; /* Allow vertical scrolling */
+            overflow-x: hidden;
+            display: flex;
+            flex-direction: column;
         }
         
         /* REWARD BANNER */
@@ -239,25 +246,165 @@
         .p-red { background: var(--primary) !important; color: white !important; }
         .p-black { background: #000 !important; color: white !important; border-bottom-color: #333 !important; }
 
-        /* BUTTONS */
-        .btn-action { 
-            width: 100%; padding: 12px; border-radius: 8px; border: none; 
-            font-weight: 900; cursor: pointer; font-size: 0.8rem; 
+        /* BUTTONS - Mobile touch targets (44px+ minimum) */
+        .btn-action {
+            width: 100%; padding: 14px; border-radius: 8px; border: none;
+            font-weight: 900; cursor: pointer; font-size: 0.9rem;
             text-transform: uppercase; transition: 0.2s;
+            min-height: 48px; /* iOS/Android touch target */
+            -webkit-tap-highlight-color: transparent;
         }
         .btn-red { background: var(--primary); color: white; }
         .btn-blue { background: #3498db; color: white; }
         .btn-green { background: #27ae60; color: white; margin-top: 10px; }
         .btn-action:disabled { opacity: 0.3; cursor: not-allowed; }
 
-        #chat-log { 
-            flex-grow: 1; overflow-y: auto; padding: 15px; 
-            background: #050505; font-size: 0.8rem; 
+        /* Floating Chat Bubble - Style A */
+        #floating-chat-bubble {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            z-index: 50;
+            background: rgba(0, 0, 0, 0.7);
+            color: #eee;
+            padding: 12px 16px;
+            border-radius: 12px;
+            border: 2px solid var(--gold);
+            max-width: 60%;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: opacity 0.3s ease, transform 0.3s ease;
+            -webkit-tap-highlight-color: transparent;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
         }
-        .chat-msg { 
-            margin-bottom: 8px; padding: 8px 12px; 
-            background: #111; border-radius: 8px; 
-            border-left: 3px solid var(--gold); 
+        #floating-chat-bubble:active {
+            transform: scale(0.95);
+        }
+        #floating-chat-bubble.fade-out {
+            opacity: 0;
+            pointer-events: none;
+        }
+        .chat-bubble-author {
+            font-weight: 900;
+            color: var(--gold);
+            font-size: 0.65rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
+        }
+        .chat-bubble-message {
+            line-height: 1.3;
+            word-wrap: break-word;
+        }
+
+        /* Chat Input on Board Area */
+        #board-chat-input {
+            position: absolute;
+            bottom: 15px;
+            left: 15px;
+            right: 15px;
+            z-index: 50;
+            display: flex;
+            gap: 8px;
+        }
+        #board-chat-input input {
+            flex: 1;
+            background: rgba(0, 0, 0, 0.8);
+            border: 2px solid var(--gold);
+            color: white;
+            padding: 12px 16px;
+            border-radius: 10px;
+            outline: none;
+            font-size: 0.85rem;
+            -webkit-tap-highlight-color: transparent;
+        }
+        #board-chat-input input::placeholder {
+            color: #666;
+        }
+
+        /* Chat History Modal */
+        #chat-history-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.9);
+            z-index: 9998;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        #chat-history-modal.active {
+            display: flex;
+        }
+        .chat-history-content {
+            background: #0a0a0a;
+            border: 2px solid var(--gold);
+            border-radius: 12px;
+            width: 100%;
+            max-width: 600px;
+            max-height: 80vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .chat-history-header {
+            background: #000;
+            padding: 15px 20px;
+            border-bottom: 2px solid var(--gold);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .chat-history-header h2 {
+            margin: 0;
+            color: var(--gold);
+            font-size: 1rem;
+            font-weight: 900;
+            letter-spacing: 1px;
+        }
+        .chat-history-close {
+            background: none;
+            border: none;
+            color: #eee;
+            font-size: 1.5rem;
+            cursor: pointer;
+            padding: 0;
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            -webkit-tap-highlight-color: transparent;
+        }
+        #chat-history-log {
+            flex: 1;
+            overflow-y: auto;
+            padding: 15px;
+            background: #050505;
+        }
+        .chat-msg {
+            margin-bottom: 10px;
+            padding: 10px 14px;
+            background: #111;
+            border-radius: 8px;
+            border-left: 3px solid var(--gold);
+        }
+        .chat-msg-author {
+            font-weight: 900;
+            color: var(--gold);
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
+        }
+        .chat-msg-text {
+            color: #eee;
+            font-size: 0.8rem;
+            line-height: 1.4;
+            word-wrap: break-word;
         }
         
         .chat-input { padding: 12px; background: #000; border-top: 1px solid #222; }
@@ -267,16 +414,24 @@
             outline: none; box-sizing: border-box; 
         }
 
-        .bottom-nav { padding: 12px; background: #050505; border-top: 1px solid #222; }
+        .bottom-nav {
+            padding: 12px;
+            background: #050505;
+            border-top: 1px solid #222;
+            /* Not fixed - scrollable */
+        }
 
-        /* SIDEBAR TABS */
+        /* SIDEBAR TABS - Mobile optimized */
         .sidebar-tabs {
             display: flex; gap: 0; background: #000; border-bottom: 2px solid #222;
+            flex-shrink: 0;
         }
         .sidebar-tab {
-            flex: 1; padding: 12px 8px; background: #0a0a0a; border: none;
-            color: #555; font-weight: 900; font-size: 0.7rem; letter-spacing: 1px;
+            flex: 1; padding: 15px 8px; background: #0a0a0a; border: none;
+            color: #555; font-weight: 900; font-size: 0.65rem; letter-spacing: 0.5px;
             cursor: pointer; transition: all 0.3s; border-bottom: 3px solid transparent;
+            min-height: 50px; display: flex; align-items: center; justify-content: center;
+            -webkit-tap-highlight-color: transparent;
         }
         .sidebar-tab:hover {
             background: #111; color: #888;
@@ -285,12 +440,46 @@
             background: #000; color: var(--gold); border-bottom-color: var(--gold);
         }
 
-        /* TAB CONTENT */
+        /* TAB CONTENT - Scrollable */
         .tab-content {
             display: none; flex: 1; overflow-y: auto;
+            overflow-x: hidden; /* Prevent horizontal scroll */
+            padding-bottom: 300px; /* Generous padding to allow scrolling past action menus */
         }
         .tab-content.active {
             display: flex; flex-direction: column;
+        }
+
+        /* Collapsible Sections */
+        .collapsible-section {
+            border-bottom: 1px solid #222;
+        }
+        .collapsible-header {
+            background: #0a0a0a; padding: 12px 15px;
+            display: flex; justify-content: space-between; align-items: center;
+            cursor: pointer; user-select: none;
+            -webkit-tap-highlight-color: transparent;
+            transition: background 0.2s;
+        }
+        .collapsible-header:active {
+            background: #151515;
+        }
+        .collapsible-header span {
+            font-size: 0.65rem; color: var(--gold);
+            font-weight: 900; letter-spacing: 1px;
+        }
+        .collapsible-toggle {
+            font-size: 1.2rem; transition: transform 0.3s;
+        }
+        .collapsible-toggle.open {
+            transform: rotate(180deg);
+        }
+        .collapsible-content {
+            max-height: 0; overflow: hidden;
+            transition: max-height 0.3s ease-out;
+        }
+        .collapsible-content.open {
+            max-height: 1000px; /* Large enough for content */
         }
 
         /* SETTING TOGGLES */
@@ -415,6 +604,57 @@
                 transform: translate(-50%, -50%) scale(1.1);
             }
         }
+
+        /* === MOBILE-SPECIFIC OPTIMIZATIONS === */
+
+        /* Portrait orientation - stack vertically */
+        @media (orientation: portrait) {
+            body { flex-direction: column; }
+            main { height: 60vh; }
+            #sidebar { height: 40vh; width: 100%; border-left: none; border-top: 2px solid #222; }
+            .board-container { width: 95vw; max-height: 55vh; }
+        }
+
+        /* Landscape orientation - side by side for foldables/tablets */
+        @media (orientation: landscape) and (min-width: 768px) {
+            body { flex-direction: row; }
+            main { flex: 1; }
+            #sidebar { width: 45%; height: 100vh; border-left: 2px solid #222; border-top: none; }
+            .board-container { width: 70vh; max-width: none; } /* Reduced from 85vh */
+        }
+
+        /* Small phones - more compact */
+        @media (max-width: 480px) {
+            .p-card { padding: 8px; gap: 8px; }
+            .p-avatar { width: 35px; height: 35px; }
+            .sidebar-tab { font-size: 0.6rem; padding: 12px 4px; }
+            .btn-action { font-size: 0.75rem; padding: 12px; }
+        }
+
+        /* Foldable expanded (like OPPO Find N) - Optimized */
+        @media (min-width: 700px) and (orientation: landscape) {
+            body { flex-direction: row; }
+            main { flex: 1; } /* Reduced from 1.2 to give more space to sidebar */
+            #sidebar { width: 420px; height: 100vh; } /* Increased from 400px */
+            .board-container { width: 60vh; max-width: 90%; } /* Smaller board for dual-screen */
+        }
+
+        /* Touch improvements */
+        .piece {
+            cursor: pointer;
+            touch-action: none;
+        }
+
+        /* Prevent text selection on mobile */
+        * {
+            -webkit-user-select: none;
+            user-select: none;
+        }
+
+        input, textarea {
+            -webkit-user-select: text;
+            user-select: text;
+        }
     </style>
 </head>
 <body>
@@ -500,9 +740,41 @@
             <img id="game-over-image" src="" alt="Game Over">
         </div>
     </div>
+
+    <!-- FLOATING CHAT BUBBLE (Style A) -->
+    <div id="floating-chat-bubble" style="display: none;" onclick="app.openChatHistory()">
+        <div class="chat-bubble-author">System</div>
+        <div class="chat-bubble-message">Welcome to the game!</div>
+    </div>
+
+    <!-- CHAT INPUT ON BOARD AREA -->
+    <div id="board-chat-input">
+        <input type="text" id="board-chat-msg" placeholder="Type your message..." onkeydown="if(event.key==='Enter') app.sendBoardChat()">
+    </div>
 </main>
 
+<!-- CHAT HISTORY MODAL -->
+<div id="chat-history-modal" onclick="app.closeChatHistory(event)">
+    <div class="chat-history-content" onclick="event.stopPropagation()">
+        <div class="chat-history-header">
+            <h2>CHAT HISTORY</h2>
+            <button class="chat-history-close" onclick="app.closeChatHistory()">&times;</button>
+        </div>
+        <div id="chat-history-log">
+            <!-- Messages will be populated here -->
+        </div>
+    </div>
+</div>
+
 <div id="sidebar">
+    <!-- EXIT AND BUG REPORT BUTTONS AT TOP - ALWAYS VISIBLE -->
+    <div class="bottom-nav" style="display:flex; gap:8px; border-top:none; border-bottom: 1px solid #222;">
+        <button class="btn-action btn-blue" style="flex:1; padding:10px; font-size:0.85rem;" onclick="app.handleExit()">Exit to Lobby</button>
+        <button class="btn-action" style="flex:1; background:#ef4444; padding:10px; font-size:0.85rem;" onclick="app.showBugReportDialog()">🐛 Report Bug</button>
+    </div>
+
+    <!-- Wrapper for tabs and content -->
+    <div class="sidebar-content-wrapper">
     <!-- Tab Navigation -->
     <div class="sidebar-tabs">
         <button class="sidebar-tab active" id="tab-btn-game" onclick="app.switchTab('game')">GAME</button>
@@ -512,7 +784,13 @@
 
     <!-- GAME TAB CONTENT -->
     <div id="tab-content-game" class="tab-content active">
-    <!-- Players Info -->
+    <!-- Players Info - Collapsible -->
+    <div class="collapsible-section">
+        <div class="collapsible-header" onclick="app.toggleCollapsible('players')">
+            <span>PLAYERS</span>
+            <span class="collapsible-toggle open" id="toggle-players">▼</span>
+        </div>
+        <div class="collapsible-content open" id="content-players">
     <div class="p-block">
         <div id="player-card-black" class="p-card" style="flex-direction: column; align-items: stretch; gap: 8px; cursor: pointer; transition: 0.2s;">
             <div style="display: flex; align-items: center; gap: 12px;">
@@ -615,21 +893,25 @@
         <!-- Emergency Reset (only shows if stuck) -->
         <button id="btn-reset-match" class="btn-action" style="display:none; background:#666; margin-top: 5px;">⚠️ RESET MATCH</button>
     </div>
-    
-    <!-- Room Presence -->
-    <div class="presence-header">
-        <span>ROOM PRESENCE</span>
-        <span id="presence-count">SYNCING...</span>
+        </div>
     </div>
+    <!-- End Players Collapsible -->
+
+    <!-- Room Presence - Collapsible -->
+    <div class="collapsible-section">
+        <div class="collapsible-header" onclick="app.toggleCollapsible('presence')">
+            <span>ROOM PRESENCE <span id="presence-count-header" style="opacity: 0.6;">(0)</span></span>
+            <span class="collapsible-toggle open" id="toggle-presence">▼</span>
+        </div>
+        <div class="collapsible-content open" id="content-presence">
     <div id="presence-list">
         <!-- Populated dynamically with Highlighting (Red/Black/White) -->
     </div>
-
-    <!-- Communication -->
-    <div id="chat-log"></div>
-    <div class="chat-input">
-        <input type="text" id="chat-msg" placeholder="Broadcast to room..." onkeydown="if(event.key==='Enter') app.sendChat()">
+        </div>
     </div>
+    <!-- End Presence Collapsible -->
+
+    <!-- Chat removed from sidebar - now floating on board area -->
     </div>
     <!-- END GAME TAB -->
 
@@ -740,12 +1022,10 @@
         </div>
     </div>
     <!-- END SETTINGS TAB -->
-
-    <!-- Exit -->
-    <div class="bottom-nav" style="display:flex; gap:8px;">
-        <button class="btn-action btn-blue" style="flex:1; padding:10px; font-size:0.85rem;" onclick="app.handleExit()">Exit to Lobby</button>
-        <button class="btn-action" style="flex:1; background:#ef4444; padding:10px; font-size:0.85rem;" onclick="app.showBugReportDialog()">🐛 Report Bug</button>
     </div>
+    <!-- End sidebar-content-wrapper -->
+
+    <!-- Chat input removed from sidebar - now on board area -->
 </div>
 
 <!-- Bug Report Dialog -->
@@ -765,7 +1045,7 @@
 <script src="./debug-logger.js"></script>
 
 <script type="module">
-    import { XQApp } from "./xq-app-FIX-INCREMENT.js?v=112&t=1737520000";
+    import { XQApp } from "./xq-app-FIX-INCREMENT.js?v=113&t=1737800000";
     // Initialize the Orchestrator which manages all modules (Engine, UI, Firebase)
     window.app = new XQApp();
     window.app.init();
@@ -787,6 +1067,42 @@
     document.getElementById('btn-reject-battle-modal').onclick = () => {
         window.app.rejectBattleRequest();
     };
+
+    // Collapsible section toggle
+    window.app.toggleCollapsible = function(section) {
+        const content = document.getElementById(`content-${section}`);
+        const toggle = document.getElementById(`toggle-${section}`);
+
+        if (!content || !toggle) return;
+
+        const isOpen = content.classList.contains('open');
+
+        if (isOpen) {
+            // Close
+            content.classList.remove('open');
+            toggle.classList.remove('open');
+        } else {
+            // Open
+            content.classList.add('open');
+            toggle.classList.add('open');
+        }
+    };
+
+    // Update presence count in header
+    const updatePresenceCountHeader = function() {
+        const presenceCount = document.getElementById('presence-count')?.textContent || '0';
+        const presenceCountHeader = document.getElementById('presence-count-header');
+        if (presenceCountHeader) {
+            presenceCountHeader.textContent = `(${presenceCount})`;
+        }
+    };
+
+    // Watch for presence count changes
+    const presenceCountEl = document.getElementById('presence-count');
+    if (presenceCountEl) {
+        const observer = new MutationObserver(updatePresenceCountHeader);
+        observer.observe(presenceCountEl, { childList: true, characterData: true, subtree: true });
+    }
 </script>
 
 </body>

@@ -174,15 +174,29 @@
     onAuthStateChanged(auth, async (user) => {
         if (!user) window.location.href = window.location.origin + '/index.html';
         else {
-            // Update lastSeen timestamp when user enters lobby
-            try {
-                const profileRef = doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'data');
-                await updateDoc(profileRef, {
-                    lastSeen: Date.now()
-                });
-            } catch (err) {
-                console.log('Could not update lastSeen:', err);
-            }
+            // Update presence when user enters lobby and keep updating every minute
+            const updatePresence = async () => {
+                try {
+                    const profileRef = doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'data');
+                    await updateDoc(profileRef, {
+                        lastSeen: Date.now(),
+                        online: true
+                    });
+                } catch (err) {
+                    console.log('Could not update presence:', err);
+                }
+            };
+
+            // Initial presence update
+            await updatePresence();
+
+            // Update presence every 60 seconds while on the page
+            const presenceInterval = setInterval(updatePresence, 60000);
+
+            // Clear interval when page is closed
+            window.addEventListener('beforeunload', () => {
+                clearInterval(presenceInterval);
+            });
 
             onSnapshot(doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'data'), (snap) => {
                 if (snap.exists()) {

@@ -26,7 +26,10 @@
       "Bash(./firebase.exe deploy:*)",
       "Bash(node simple-deploy.js:*)",
       "Bash(npx firebase deploy:*)",
-      "Bash(copy:*)"
+      "Bash(copy:*)",
+      "Bash(powershell.exe -Command:*)",
+      "Bash(ls:*)",
+      "Bash(cd \"E:\"\" && powershell -Command \"Compress-Archive -Path 'FireBase-SG' -DestinationPath 'FireBase-SG.zip' -Force \")"
     ]
   }
 }

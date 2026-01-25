@@ -1,0 +1,23 @@
+===== FIRESTORE RULES UPDATE FOR BUG REPORTING =====
+
+Add this rule to your Firestore rules to allow bug report submissions:
+
+```javascript
+// Debug and Bug Reports
+match /artifacts/{appId}/debug/bug-reports/{reportId} {
+  // Anyone authenticated can submit bug reports
+  allow create: if request.auth != null;
+
+  // Only admins can read bug reports
+  allow read: if request.auth != null && isAdmin(appId);
+
+  // Only admins can delete bug reports
+  allow delete: if request.auth != null && isAdmin(appId);
+}
+```
+
+Add this INSIDE the existing `match /artifacts/{appId}` block, alongside the other rules.
+
+===== COMPLETE UPDATED RULES =====
+
+(See the full rules in the next section with the debug rules integrated)

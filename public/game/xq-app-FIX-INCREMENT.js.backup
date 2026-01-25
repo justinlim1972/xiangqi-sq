@@ -149,31 +149,12 @@ export class XQApp {
         const rewardEl = document.getElementById('match-reward-tile');
         if (rewardEl) rewardEl.innerText = decodeURIComponent(this.rewardTile);
 
-        // Initialize debug logger (safe, non-invasive)
-        try {
-            if (window.debugLogger) {
-                window.debugLogger.init(this.tid, null); // userId will be set after auth
-                console.log('🐛 Debug logger initialized');
-            }
-        } catch (e) {
-            console.log('Debug logger initialization failed (non-critical):', e);
-        }
-
         onAuthStateChanged(this.auth, async (u) => {
             console.log('🔐 AUTH STATE CHANGED - User:', u?.uid);
             console.log('  hasJoined flag:', this.hasJoined);
 
             if(!u) return window.location.href = '../index.html';
             this.user = u;
-
-            // Update debug logger with user ID
-            try {
-                if (window.debugLogger) {
-                    window.debugLogger.userId = u.uid;
-                }
-            } catch (e) {
-                console.log('Debug logger user update failed (non-critical):', e);
-            }
 
             try {
                 const snap = await getDoc(doc(this.db, 'artifacts', this.appId, 'users', u.uid, 'profile', 'data'));
@@ -535,64 +516,47 @@ export class XQApp {
         }, 1000);
     }
 
-    startTimerDisplay() {
-        // Display timer that reads from Firebase (source of truth)
-        console.log('⏱️ Starting timer DISPLAY (reads from Firebase every second)');
+    startTimerInterval() {
+        // Start ONLY the interval, without initialization
+        // This is called when turn changes
+        console.log('⏱️ Starting LOCAL timer interval (no Firebase sync)...');
 
-        // Stop any existing interval
+        // Stop any existing interval first
         if (this.timerInterval) {
             clearInterval(this.timerInterval);
+            this.timerInterval = null;
         }
 
-        // Display update interval - reads from Firebase and calculates display time
-        this.timerInterval = setInterval(async () => {
+        // Reset tick counter
+        this.timerTickCount = 0;
+
+        // LOCAL TIMER: Runs on ALL clients independently (no Firebase sync!)
+        this.timerInterval = setInterval(() => {
             if (!this.gameState || this.gameState.status !== 'playing') {
                 this.stopTimer();
                 return;
             }
 
-            try {
-                // Read timer values from Firebase (SOURCE OF TRUTH)
-                const gameRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'games', this.tid);
-                const gameSnap = await getDoc(gameRef);
-                const gameData = gameSnap.data();
-
-                if (!gameData || !gameData.timerStarted) {
-                    // Timer not initialized yet
+            // Decrement the timer for whoever's turn it is
+            if (this.gameState.turn === 'red') {
+                this.redTimeLeft--;
+                if (this.redTimeLeft <= 0) {
+                    this.redTimeLeft = 0;
+                    this.handleTimeout('red');
                     return;
                 }
-
-                // Calculate elapsed time since last update
-                const now = Date.now();
-                const lastUpdate = gameData.lastTimerUpdate || now;
-                const elapsedSeconds = Math.floor((now - lastUpdate) / 1000);
-
-                // Calculate display time (Firebase value minus elapsed for current player)
-                let displayRedTime = gameData.redTimeLeft || 0;
-                let displayBlackTime = gameData.blackTimeLeft || 0;
-
-                if (this.gameState.turn === 'red') {
-                    displayRedTime = Math.max(0, displayRedTime - elapsedSeconds);
-                    if (displayRedTime <= 0) {
-                        this.handleTimeout('red');
-                        return;
-                    }
-                } else {
-                    displayBlackTime = Math.max(0, displayBlackTime - elapsedSeconds);
-                    if (displayBlackTime <= 0) {
-                        this.handleTimeout('black');
-                        return;
-                    }
+            } else {
+                this.blackTimeLeft--;
+                if (this.blackTimeLeft <= 0) {
+                    this.blackTimeLeft = 0;
+                    this.handleTimeout('black');
+                    return;
                 }
-
-                // Update local display values
-                this.redTimeLeft = displayRedTime;
-                this.blackTimeLeft = displayBlackTime;
-
-                this.updateTimerDisplay();
-            } catch (err) {
-                console.error('❌ Error reading timer from Firebase:', err);
             }
+
+            this.updateTimerDisplay();
+
+            // console.log(`⏱️ LOCAL timer tick: Red=${this.redTimeLeft}s, Black=${this.blackTimeLeft}s, Turn=${this.gameState.turn}`);
         }, 1000);
     }
 
@@ -947,39 +911,13 @@ export class XQApp {
                 timestamp: Date.now()
             });
 
-            // Detect battle start: Initialize timer when game status changes to 'playing'
-            // IMPORTANT: Only initialize if previous status was explicitly NOT 'playing' (avoid re-initializing on page load)
+            // Detect battle start: Show splash screen for EVERYONE when game status changes to 'playing'
+            // IMPORTANT: Only show if previous status was explicitly NOT 'playing' (avoid showing on page load)
             const battleJustStarted = g.status === 'playing' && this.previousGameStatus !== null && this.previousGameStatus !== 'playing';
             if (battleJustStarted) {
-                console.log('⚔️ Battle just started! Initializing timer in Firebase...');
-
-                // Initialize timer immediately (no splash screen delay)
-                const iAmRed = this.table?.playerRed?.uid === this.user?.uid;
-
-                if (iAmRed) {
-                    console.log('⏱️🔴 I am RED - initializing timer in Firebase');
-
-                    // Get time control
-                    const regionRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'regions', this.rid);
-                    getDoc(regionRef).then(regionSnap => {
-                        const baseTime = (regionSnap.data()?.baseTime || 15) * 60;
-
-                        const gameRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'games', this.tid);
-                        setDoc(gameRef, {
-                            redTimeLeft: baseTime,
-                            blackTimeLeft: baseTime,
-                            lastTimerUpdate: Date.now(),
-                            timerStarted: true
-                        }, { merge: true }).then(() => {
-                            console.log(`⏱️✅ Timer initialized: ${baseTime}s each`);
-                        });
-                    });
-                } else {
-                    console.log('⏱️⚫ I am BLACK or Observer - waiting for RED to initialize timer');
-                }
-
-                // All clients start display update immediately
-                this.startTimerDisplay();
+                console.log('⚔️ Battle just started! Showing splash for everyone...');
+                this.showBattleSplash();
+                // Timer will start automatically after splash ends (in showBattleSplash)
             }
 
             // Update previous status for next comparison (set to null on first load if no previous status)
@@ -1035,7 +973,7 @@ export class XQApp {
 
             // Ensure timer is running
             if (!this.timerInterval) {
-                this.startTimer();
+                this.startTimerInterval();
             }
 
             this.previousTurn = g.turn;
@@ -1067,30 +1005,13 @@ export class XQApp {
             console.log('📞 Calling updateInGameControls from syncGame()');
             this.updateInGameControls();
 
-            // Update chat (desktop sidebar - may not exist on mobile)
+            // Update chat
             const log = document.getElementById('chat-log');
             if(log && g.chat) {
                 log.innerHTML = g.chat.slice(-50).map(m =>
                     `<div class="chat-msg"><strong>${m.user}:</strong> ${m.text}</div>`
                 ).join('');
                 log.scrollTop = log.scrollHeight;
-            }
-
-            // Update chat history modal (mobile)
-            const historyLog = document.getElementById('chat-history-log');
-            if(historyLog && g.chat) {
-                historyLog.innerHTML = g.chat.slice(-50).map(m =>
-                    `<div class="chat-msg">
-                        <div class="chat-msg-author">${m.user}</div>
-                        <div class="chat-msg-text">${m.text}</div>
-                    </div>`
-                ).join('');
-                historyLog.scrollTop = historyLog.scrollHeight;
-            }
-
-            // Update floating chat bubble (mobile)
-            if (g.chat && g.chat.length > 0) {
-                this.updateFloatingChatBubble(g.chat);
             }
 
             // Auto-update MOVES tab if it's active
@@ -1768,102 +1689,25 @@ export class XQApp {
      * FIX #2: Chat System Fixed
      */
     async sendChat() {
-        const el = document.getElementById('chat-msg');
+        const el = document.getElementById('chat-msg'); 
         if(!el || !el.value.trim() || !this.user) return;
-
+        
         const myName = this.profile?.playerName || this.user.email.split('@')[0];
         const gameRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'games', this.tid);
-
+        
         try {
-            await setDoc(gameRef, {
-                chat: arrayUnion({
-                    user: myName,
+            await setDoc(gameRef, { 
+                chat: arrayUnion({ 
+                    user: myName, 
                     text: el.value.trim(),
                     ts: Date.now()
-                })
+                }) 
             }, { merge: true });
             el.value = "";
-        } catch (e) {
+        } catch (e) { 
             console.error("Chat Error:", e);
             this.showStatus("Chat Failed", "red");
         }
-    }
-
-    /**
-     * MOBILE: Send chat from board area input
-     */
-    async sendBoardChat() {
-        const el = document.getElementById('board-chat-msg');
-        if(!el || !el.value.trim() || !this.user) return;
-
-        const myName = this.profile?.playerName || this.user.email.split('@')[0];
-        const gameRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'games', this.tid);
-
-        try {
-            await setDoc(gameRef, {
-                chat: arrayUnion({
-                    user: myName,
-                    text: el.value.trim(),
-                    ts: Date.now()
-                })
-            }, { merge: true });
-            el.value = "";
-        } catch (e) {
-            console.error("Chat Error:", e);
-            this.showStatus("Chat Failed", "red");
-        }
-    }
-
-    /**
-     * MOBILE: Open chat history modal
-     */
-    openChatHistory() {
-        const modal = document.getElementById('chat-history-modal');
-        if (modal) {
-            modal.classList.add('active');
-        }
-    }
-
-    /**
-     * MOBILE: Close chat history modal
-     */
-    closeChatHistory(event) {
-        // If event is provided and clicked target is not the modal background, ignore
-        if (event && event.target.id !== 'chat-history-modal') return;
-
-        const modal = document.getElementById('chat-history-modal');
-        if (modal) {
-            modal.classList.remove('active');
-        }
-    }
-
-    /**
-     * MOBILE: Update floating chat bubble with latest message
-     */
-    updateFloatingChatBubble(messages) {
-        if (!messages || messages.length === 0) return;
-
-        const bubble = document.getElementById('floating-chat-bubble');
-        if (!bubble) return;
-
-        // Get the latest message
-        const latestMsg = messages[messages.length - 1];
-
-        // Update bubble content
-        bubble.innerHTML = `
-            <div class="chat-bubble-author">${latestMsg.user}</div>
-            <div class="chat-bubble-message">${latestMsg.text}</div>
-        `;
-
-        // Show bubble
-        bubble.style.display = 'block';
-        bubble.classList.remove('fade-out');
-
-        // Auto-fade after 5 seconds
-        clearTimeout(this.chatBubbleTimeout);
-        this.chatBubbleTimeout = setTimeout(() => {
-            bubble.classList.add('fade-out');
-        }, 5000);
     }
 
     /**
@@ -2100,6 +1944,52 @@ export class XQApp {
         await this.engageBattle();
     }
 
+    showBattleSplash() {
+        console.log('🎬 Showing battle splash screen...');
+
+        const splash = document.getElementById('battle-splash');
+        if (!splash) return;
+
+        // Show splash screen
+        splash.classList.add('active');
+
+        // Play Chinese voice using Web Speech API with intense tone
+        if ('speechSynthesis' in window) {
+            // Cancel any ongoing speech
+            window.speechSynthesis.cancel();
+
+            const utterance = new SpeechSynthesisUtterance('即分高下，也决生死！');
+            utterance.lang = 'zh-CN'; // Chinese (Simplified)
+            utterance.rate = 0.9; // Slightly slower for dramatic effect
+            utterance.pitch = 0.8; // Lower pitch for intensity
+            utterance.volume = 1.0; // Maximum volume
+
+            // Try to find a male Chinese voice
+            const voices = window.speechSynthesis.getVoices();
+            const chineseVoice = voices.find(voice =>
+                voice.lang.startsWith('zh') && voice.name.toLowerCase().includes('male')
+            ) || voices.find(voice => voice.lang.startsWith('zh'));
+
+            if (chineseVoice) {
+                utterance.voice = chineseVoice;
+                console.log('🎤 Using voice:', chineseVoice.name);
+            }
+
+            window.speechSynthesis.speak(utterance);
+        }
+
+        // Hide splash after 5 seconds
+        setTimeout(() => {
+            splash.classList.remove('active');
+            console.log('🎬 Battle splash hidden');
+
+            // Start timer after splash ends
+            if (!this.timerInterval && this.gameState?.status === 'playing') {
+                console.log('⏱️ Starting timer after splash screen...');
+                this.startTimer();
+            }
+        }, 5000);
+    }
 
     async engageBattle() {
         console.log('⚔️ Engaging battle...');
@@ -2366,47 +2256,21 @@ export class XQApp {
         }
         // NOTE: Check animation will also be triggered by Firebase sync
 
-        // CRITICAL: Calculate and save timer values to Firebase (SOURCE OF TRUTH)
-        const now = Date.now();
-        const gameSnap = await getDoc(gameRef);
-        const currentGameData = gameSnap.data();
-
-        const lastUpdate = currentGameData?.lastTimerUpdate || now;
-        const elapsedSeconds = Math.floor((now - lastUpdate) / 1000);
-
-        // Get increment from region
-        const regionRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'regions', this.rid);
-        const regionSnap = await getDoc(regionRef);
-        const increment = regionSnap.data()?.increment || 0;
-
-        // Calculate new timer values
-        let newRedTime = currentGameData?.redTimeLeft || 900;
-        let newBlackTime = currentGameData?.blackTimeLeft || 900;
-
-        // Deduct time from player who just moved, add increment
-        if (this.gameState.turn === 'red') {
-            newRedTime = Math.max(0, newRedTime - elapsedSeconds + increment);
-        } else {
-            newBlackTime = Math.max(0, newBlackTime - elapsedSeconds + increment);
-        }
-
-        console.log(`⏱️ FIREBASE TIMER UPDATE: Red=${newRedTime}s, Black=${newBlackTime}s, Elapsed=${elapsedSeconds}s, Increment=${increment}s`);
-
         const updateData = {
             board: flatBoard,
             turn: nextTurn,
             lastMove: moveData,
             history: arrayUnion(moveData),
-            moveHistory: arrayUnion(moveRecord), // Track board positions for repetition detection
-            redTimeLeft: newRedTime,
-            blackTimeLeft: newBlackTime,
-            lastTimerUpdate: now
+            moveHistory: arrayUnion(moveRecord) // Track board positions for repetition detection
         };
 
         if (newStatus !== 'playing') {
             updateData.status = newStatus;
             if (winner) updateData.winner = winner;
         }
+
+        // NO TIMER SYNC - timers are purely local now
+        // Time increments are handled locally via move timestamps
 
         await setDoc(gameRef, updateData, { merge: true });
 
@@ -3549,55 +3413,6 @@ export class XQApp {
         } else if (occupantCount === 0) {
             // Room is empty - stop music
             this.stopAmbientMusic();
-        }
-    }
-
-    // === BUG REPORTING SYSTEM ===
-    showBugReportDialog() {
-        const dialog = document.getElementById('bug-report-dialog');
-        if (dialog) {
-            dialog.style.display = 'flex';
-            document.getElementById('bug-description').value = '';
-            document.getElementById('bug-description').focus();
-        }
-    }
-
-    closeBugReportDialog() {
-        const dialog = document.getElementById('bug-report-dialog');
-        if (dialog) {
-            dialog.style.display = 'none';
-        }
-    }
-
-    async submitBugReport() {
-        try {
-            const description = document.getElementById('bug-description').value.trim();
-            if (!description) {
-                alert('Please describe the issue before submitting.');
-                return;
-            }
-
-            // Use the debug logger to submit report
-            if (window.debugLogger) {
-                const reportId = await window.debugLogger.submitBugReport(
-                    description,
-                    this.db,
-                    this.appId
-                );
-
-                this.closeBugReportDialog();
-
-                if (reportId) {
-                    alert('Bug report submitted successfully! Thank you for helping improve the game.');
-                } else {
-                    alert('Bug report saved locally. It will be synced when connection is available.');
-                }
-            } else {
-                alert('Debug logger not available. Please refresh the page and try again.');
-            }
-        } catch (e) {
-            console.error('Error submitting bug report:', e);
-            alert('Failed to submit bug report: ' + e.message);
         }
     }
 }

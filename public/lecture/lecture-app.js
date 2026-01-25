@@ -1,6 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-import { getFirestore, doc, onSnapshot, updateDoc, getDoc, setDoc, arrayUnion, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+import { getFirestore, doc, onSnapshot, updateDoc, getDoc, setDoc, arrayUnion, serverTimestamp, deleteField } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 import { XQUI } from '../game/xq-ui.js';
 import { XQEngine } from '../game/xq-engine.js';
 
@@ -554,9 +554,10 @@ window.exitLecture = async function() {
                 lastMoveTime: serverTimestamp()
             });
 
-            // Reset student count in table
+            // Reset student count and clear lecturer info
             await updateDoc(tableRef, {
-                students: 0
+                students: 0,
+                lecturer: deleteField()  // Remove lecturer field completely
             });
         } else {
             // Student is exiting - decrement student count

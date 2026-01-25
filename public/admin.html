@@ -80,6 +80,7 @@
     <div style="display: flex; gap: 10px;">
         <button class="btn" style="background:var(--gold); color:#000; font-weight:900;" onclick="forceFixOrdering()">🔧 Fix Region Order</button>
         <button class="btn" style="background:#10b981; color:white; font-weight:900;" onclick="toggleUserManagement()">👥 User Management</button>
+        <button class="btn" style="background:#ef4444; color:white; font-weight:900;" onclick="toggleBugReports()">🐛 Bug Reports</button>
         <button class="btn" style="background:rgba(255,255,255,0.2); color:white;" onclick="window.location.href=window.location.origin + '/lobby/lobby.html'">Exit to Lobby</button>
     </div>
 </header>
@@ -101,7 +102,7 @@
                 <div id="online-users" style="font-size: 1.8rem; font-weight: 900; color: #1e3a8a; margin-top: 5px;">-</div>
             </div>
             <div style="background: #fef3c7; padding: 15px; border-radius: 10px; border-left: 4px solid #f59e0b;">
-                <div style="font-size: 0.75rem; color: #92400e; font-weight: 700; text-transform: uppercase;">Active Today</div>
+                <div style="font-size: 0.75rem; color: #92400e; font-weight: 700; text-transform: uppercase;">Playing Now</div>
                 <div id="active-today" style="font-size: 1.8rem; font-weight: 900; color: #78350f; margin-top: 5px;">-</div>
             </div>
             <div style="background: #fce7f3; padding: 15px; border-radius: 10px; border-left: 4px solid #ec4899;">
@@ -128,6 +129,17 @@
                 <tr><td colspan="10" style="text-align:center; padding:40px; color:#94a3b8;">Loading user data...</td></tr>
             </tbody>
         </table>
+    </div>
+
+    <!-- BUG REPORTS SECTION (Hidden by default) -->
+    <div id="bug-reports-section" class="card full-width" style="display:none;">
+        <h2>
+            🐛 Bug Reports
+            <button class="btn btn-sm" style="background:#64748b; color:white;" onclick="toggleBugReports()">Back to Region Management</button>
+        </h2>
+        <div id="bug-reports-container" style="margin-top:20px;">
+            <p style="text-align:center; padding:40px; color:#94a3b8;">Loading bug reports...</p>
+        </div>
     </div>
 
     <!-- REGION COLUMN -->
@@ -789,59 +801,10 @@
         try {
             console.log('🔍 Loading user management data...');
 
-            // Step 1: Load ALL users from the users collection
             const userMap = new Map();
-            const currentUser = auth.currentUser;
-
-            if (!currentUser) {
-                console.error('No current user!');
-                return;
-            }
-
-            // Get all user profiles from artifacts/sg-xiangqi/users/*/profile/data
-            // Note: This requires Firestore rules to allow admins to list users
-            const usersCollectionRef = collection(db, 'artifacts', appId, 'users');
-            let usersSnapshot;
-
-            try {
-                usersSnapshot = await getDocs(usersCollectionRef);
-                console.log(`📊 Found ${usersSnapshot.size} user documents in collection`);
-            } catch (err) {
-                console.error('❌ Cannot read users collection:', err);
-                alert('Cannot read users collection. This may be a permissions issue. Please check Firestore rules.');
-                return;
-            }
-
             const now = Date.now();
 
-            // Load each user's profile data
-            for (const userDoc of usersSnapshot.docs) {
-                const uid = userDoc.id;
-                try {
-                    const profileRef = doc(db, 'artifacts', appId, 'users', uid, 'profile', 'data');
-                    const profileSnap = await getDoc(profileRef);
-
-                    if (profileSnap.exists()) {
-                        const profile = profileSnap.data();
-                        userMap.set(uid, {
-                            uid,
-                            email: profile.email || 'N/A',
-                            playerName: profile.playerName || 'Anonymous',
-                            role: profile.role || 'user',
-                            lastSeen: profile.lastSeen || 0,
-                            gamesPlayed: 0,
-                            lastTable: '-',
-                            currentTable: null
-                        });
-                    }
-                } catch (err) {
-                    console.log(`Cannot read profile for user ${uid}:`, err.message);
-                }
-            }
-
-            console.log(`✅ Loaded ${userMap.size} user profiles`);
-
-            // Step 2: Check who's currently online (seated at tables)
+            // Step 1: Scan all tables to discover users and check who's online
             const regionsRef = collection(db, 'artifacts', appId, 'public', 'data', 'regions');
             const regionsSnap = await getDocs(regionsRef);
 
@@ -852,23 +815,111 @@
                 for (const tableDoc of tablesSnap.docs) {
                     const table = tableDoc.data();
 
-                    // Check Red Player
-                    if (table.playerRed?.uid && userMap.has(table.playerRed.uid)) {
-                        const userData = userMap.get(table.playerRed.uid);
+                    // Process Red Player
+                    if (table.playerRed?.uid) {
+                        const uid = table.playerRed.uid;
+                        if (!userMap.has(uid)) {
+                            userMap.set(uid, {
+                                uid,
+                                email: table.playerRed.email || 'N/A',
+                                playerName: table.playerRed.playerName || 'Anonymous',
+                                role: 'user',
+                                lastSeen: 0,
+                                gamesPlayed: 0,
+                                lastTable: '-',
+                                currentTable: null
+                            });
+                        }
+                        const userData = userMap.get(uid);
                         userData.currentTable = tableDoc.id;
                         userData.lastSeen = now;
                     }
 
-                    // Check Black Player
-                    if (table.playerBlack?.uid && userMap.has(table.playerBlack.uid)) {
-                        const userData = userMap.get(table.playerBlack.uid);
+                    // Process Black Player
+                    if (table.playerBlack?.uid) {
+                        const uid = table.playerBlack.uid;
+                        if (!userMap.has(uid)) {
+                            userMap.set(uid, {
+                                uid,
+                                email: table.playerBlack.email || 'N/A',
+                                playerName: table.playerBlack.playerName || 'Anonymous',
+                                role: 'user',
+                                lastSeen: 0,
+                                gamesPlayed: 0,
+                                lastTable: '-',
+                                currentTable: null
+                            });
+                        }
+                        const userData = userMap.get(uid);
                         userData.currentTable = tableDoc.id;
                         userData.lastSeen = now;
                     }
                 }
             }
 
-            // Step 3: Count games played (from game history)
+            console.log(`📊 Found ${userMap.size} users from tables`);
+
+            // Step 2: Also check the usernames registry to find ALL registered users
+            try {
+                const usernamesRef = collection(db, 'artifacts', appId, 'public', 'data', 'usernames');
+                const usernamesSnap = await getDocs(usernamesRef);
+
+                console.log(`📋 Found ${usernamesSnap.size} registered usernames`);
+
+                if (usernamesSnap.size === 0) {
+                    console.warn('⚠️ No usernames found in registry. Users may not have registered yet, or there may be a permissions issue.');
+                }
+
+                for (const usernameDoc of usernamesSnap.docs) {
+                    const usernameData = usernameDoc.data();
+                    const uid = usernameData.uid;
+
+                    console.log(`   - Username: ${usernameDoc.id}, UID: ${uid}`);
+
+                    if (uid && !userMap.has(uid)) {
+                        // This is a registered user who hasn't played yet
+                        userMap.set(uid, {
+                            uid,
+                            email: 'N/A',
+                            playerName: usernameDoc.id, // username is the doc ID
+                            role: 'user',
+                            lastSeen: 0,
+                            gamesPlayed: 0,
+                            lastTable: '-',
+                            currentTable: null
+                        });
+                    }
+                }
+
+                console.log(`✅ Total unique users: ${userMap.size}`);
+            } catch (err) {
+                console.error('❌ Cannot read usernames registry:', err);
+                console.error('Error details:', err.code, err.message);
+            }
+
+            // Step 3: Load full profile data and roles for all discovered users
+            for (const [uid, userData] of userMap) {
+                try {
+                    const profileRef = doc(db, 'artifacts', appId, 'users', uid, 'profile', 'data');
+                    const profileSnap = await getDoc(profileRef);
+
+                    if (profileSnap.exists()) {
+                        const profile = profileSnap.data();
+                        userData.role = profile.role || 'user';
+                        userData.email = profile.email || userData.email;
+                        userData.playerName = profile.playerName || userData.playerName;
+                        if (profile.lastSeen && profile.lastSeen > userData.lastSeen) {
+                            userData.lastSeen = profile.lastSeen;
+                        }
+                    }
+                } catch (err) {
+                    console.log(`Cannot read profile for user ${uid}:`, err.message);
+                }
+            }
+
+            console.log(`✅ Loaded profile data for ${userMap.size} users`);
+
+            // Step 4: Count games played (from game history)
             for (const regionDoc of regionsSnap.docs) {
                 const tablesRef = collection(db, 'artifacts', appId, 'public', 'data', 'regions', regionDoc.id, 'tables');
                 const tablesSnap = await getDocs(tablesRef);
@@ -909,12 +960,14 @@
 
             const users = Array.from(userMap.values());
 
-            const oneDayAgo = now - (24 * 60 * 60 * 1000);
+            const fiveMinutesAgo = now - (5 * 60 * 1000); // 5 minutes for online status
 
             // Update statistics
+            // ONLINE NOW = Anyone who was active in the last 5 minutes (logged into server)
+            // ACTIVE TODAY = Anyone currently playing at a table
             document.getElementById('total-users').textContent = users.length;
-            document.getElementById('online-users').textContent = users.filter(u => u.currentTable).length;
-            document.getElementById('active-today').textContent = users.filter(u => u.lastSeen > oneDayAgo).length;
+            document.getElementById('online-users').textContent = users.filter(u => u.lastSeen > fiveMinutesAgo).length;
+            document.getElementById('active-today').textContent = users.filter(u => u.currentTable).length;
             document.getElementById('admin-count').textContent = users.filter(u => u.role === 'admin').length;
 
             // Sort by last seen (most recent first)
@@ -923,6 +976,11 @@
             // Render table
             const tbody = document.getElementById('user-table-body');
             tbody.innerHTML = '';
+
+            if (users.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="10" style="text-align:center; padding:40px; color:#94a3b8;"><strong>No users found</strong><br><br>Users will appear here after they:<br>• Register an account<br>• Join a table to play<br><br>Check the browser console for detailed logs.</td></tr>';
+                return;
+            }
 
             users.forEach(user => {
                 const row = document.createElement('tr');
@@ -1017,6 +1075,151 @@
             } else {
                 alert('Error updating user role: ' + e.message);
             }
+        }
+    };
+
+    // === BUG REPORTS MANAGEMENT ===
+    window.toggleBugReports = () => {
+        const bugSection = document.getElementById('bug-reports-section');
+        const userSection = document.getElementById('user-management-section');
+        const regionColumn = document.getElementById('region-column');
+        const tablesColumn = document.getElementById('tables-column');
+
+        if (bugSection.style.display === 'none') {
+            // Show bug reports
+            bugSection.style.display = 'block';
+            userSection.style.display = 'none';
+            regionColumn.style.display = 'none';
+            tablesColumn.style.display = 'none';
+            loadBugReports();
+        } else {
+            // Hide bug reports
+            bugSection.style.display = 'none';
+            regionColumn.style.display = 'block';
+            tablesColumn.style.display = 'block';
+        }
+    };
+
+    async function loadBugReports() {
+        const container = document.getElementById('bug-reports-container');
+        container.innerHTML = '<p style="text-align:center; padding:40px; color:#94a3b8;">Loading...</p>';
+
+        try {
+            const reportsRef = collection(db, 'artifacts', appId, 'bug-reports');
+            const q = query(reportsRef, orderBy('reportedAt', 'desc'));
+            const snapshot = await getDocs(q);
+
+            if (snapshot.empty) {
+                container.innerHTML = '<p style="text-align:center; padding:40px; color:#94a3b8;">No bug reports yet.</p>';
+                return;
+            }
+
+            let html = '<div style="display:flex; flex-direction:column; gap:15px;">';
+
+            snapshot.forEach(doc => {
+                const report = doc.data();
+                const reportDate = new Date(report.reportedAt || 0).toLocaleString();
+
+                html += `
+                    <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; padding:20px;">
+                        <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:15px;">
+                            <div>
+                                <h3 style="margin:0 0 5px 0; color:#1e293b;">🐛 ${report.userDescription || 'No description'}</h3>
+                                <div style="font-size:0.85rem; color:#64748b;">
+                                    <span><strong>Game ID:</strong> ${report.gameId || 'N/A'}</span> |
+                                    <span><strong>User:</strong> ${report.userId || 'Anonymous'}</span> |
+                                    <span><strong>Reported:</strong> ${reportDate}</span>
+                                </div>
+                            </div>
+                            <div style="display:flex; gap:8px;">
+                                <button class="btn btn-sm" style="background:#3b82f6; color:white;" onclick="exportForClaude('${doc.id}')">📋 Export for Claude</button>
+                                <button class="btn btn-danger btn-sm" onclick="deleteBugReport('${doc.id}')">Delete</button>
+                            </div>
+                        </div>
+
+                        <details style="margin-top:10px;">
+                            <summary style="cursor:pointer; padding:8px; background:#e2e8f0; border-radius:6px; font-weight:600;">View Details</summary>
+                            <div style="margin-top:10px; padding:10px; background:#fff; border-radius:6px; font-family:monospace; font-size:0.8rem;">
+                                <p><strong>Screen Size:</strong> ${report.screenSize?.width}x${report.screenSize?.height}</p>
+                                <p><strong>URL:</strong> ${report.url}</p>
+                                <p><strong>User Agent:</strong> ${report.userAgent}</p>
+                                <p><strong>Logs (${report.logs?.length || 0} events):</strong></p>
+                                <pre style="max-height:300px; overflow-y:auto; background:#f1f5f9; padding:10px; border-radius:4px; font-size:0.75rem;">${JSON.stringify(report.logs || [], null, 2)}</pre>
+                            </div>
+                        </details>
+                    </div>
+                `;
+            });
+
+            html += '</div>';
+            container.innerHTML = html;
+
+        } catch (e) {
+            console.error('Error loading bug reports:', e);
+            container.innerHTML = `<p style="text-align:center; padding:40px; color:#ef4444;">Error loading reports: ${e.message}</p>`;
+        }
+    }
+
+    window.deleteBugReport = async (reportId) => {
+        if (!confirm('Delete this bug report?')) return;
+
+        try {
+            await deleteDoc(doc(db, 'artifacts', appId, 'bug-reports', reportId));
+            loadBugReports(); // Reload the list
+        } catch (e) {
+            alert('Error deleting report: ' + e.message);
+        }
+    };
+
+    window.exportForClaude = async (reportId) => {
+        try {
+            const reportDoc = await getDoc(doc(db, 'artifacts', appId, 'bug-reports', reportId));
+            if (!reportDoc.exists()) {
+                alert('Report not found');
+                return;
+            }
+
+            const report = reportDoc.data();
+
+            // Format the report in a Claude-friendly way
+            const exportText = `
+=== BUG REPORT FOR CLAUDE ===
+
+USER DESCRIPTION:
+${report.userDescription || 'No description provided'}
+
+GAME CONTEXT:
+- Game ID: ${report.gameId || 'N/A'}
+- User ID: ${report.userId || 'Anonymous'}
+- Reported At: ${new Date(report.reportedAt || 0).toLocaleString()}
+- URL: ${report.url || 'N/A'}
+- Screen Size: ${report.screenSize?.width || '?'}x${report.screenSize?.height || '?'}
+- User Agent: ${report.userAgent || 'N/A'}
+
+EVENT LOGS (Last ${report.logs?.length || 0} events):
+${JSON.stringify(report.logs || [], null, 2)}
+
+=== END OF REPORT ===
+
+Instructions: Copy this entire report and paste it into your conversation with Claude. Claude can analyze the event logs to identify the root cause of the issue.
+`.trim();
+
+            // Copy to clipboard
+            await navigator.clipboard.writeText(exportText);
+
+            // Show success message
+            const alertDiv = document.createElement('div');
+            alertDiv.style.cssText = 'position:fixed; top:20px; right:20px; background:#10b981; color:white; padding:15px 20px; border-radius:8px; box-shadow:0 4px 6px rgba(0,0,0,0.1); z-index:10000; font-weight:600;';
+            alertDiv.textContent = '✓ Report copied to clipboard! Paste it in your chat with Claude.';
+            document.body.appendChild(alertDiv);
+
+            setTimeout(() => {
+                alertDiv.remove();
+            }, 3000);
+
+        } catch (e) {
+            console.error('Export error:', e);
+            alert('Error exporting report: ' + e.message);
         }
     };
 </script>
