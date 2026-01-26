@@ -1,6 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-import { getFirestore, doc, onSnapshot, setDoc, getDoc, arrayUnion, arrayRemove, deleteField, increment, serverTimestamp, runTransaction } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+import { getFirestore, doc, onSnapshot, setDoc, getDoc, updateDoc, arrayUnion, arrayRemove, deleteField, increment, serverTimestamp, runTransaction } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 import { getDatabase, ref, onValue, onDisconnect, set, remove } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-database.js";
 import { XQEngine } from "./xq-engine.js";
 import { XQUI } from "./xq-ui.js?v=107";
@@ -3759,6 +3759,76 @@ export class XQApp {
                 moves: history.length,
                 winner: winner
             });
+
+            // Import ELO system
+            const { eloSystem } = await import('./elo-system.js');
+
+            // Load current ELO ratings and games played for both players
+            const redProfileRef = doc(this.db, 'artifacts', this.appId, 'users', redPlayer.uid, 'profile', 'data');
+            const blackProfileRef = doc(this.db, 'artifacts', this.appId, 'users', blackPlayer.uid, 'profile', 'data');
+
+            const [redProfileSnap, blackProfileSnap] = await Promise.all([
+                getDoc(redProfileRef),
+                getDoc(blackProfileRef)
+            ]);
+
+            // Get current ratings (default to starting ELO if not set)
+            const redProfile = redProfileSnap.exists() ? redProfileSnap.data() : {};
+            const blackProfile = blackProfileSnap.exists() ? blackProfileSnap.data() : {};
+
+            const redCurrentELO = redProfile.elo || eloSystem.STARTING_ELO;
+            const blackCurrentELO = blackProfile.elo || eloSystem.STARTING_ELO;
+            const redGamesPlayed = redProfile.gamesPlayed || 0;
+            const blackGamesPlayed = blackProfile.gamesPlayed || 0;
+
+            // Calculate ELO changes
+            const eloChanges = eloSystem.calculateGameRatings({
+                redPlayer: {
+                    uid: redPlayer.uid,
+                    elo: redCurrentELO,
+                    gamesPlayed: redGamesPlayed
+                },
+                blackPlayer: {
+                    uid: blackPlayer.uid,
+                    elo: blackCurrentELO,
+                    gamesPlayed: blackGamesPlayed
+                },
+                winner: winner
+            });
+
+            console.log('🎯 ELO Changes:', {
+                red: `${redCurrentELO} → ${eloChanges.red.newRating} (${eloSystem.formatELOChange(eloChanges.red.change)})`,
+                black: `${blackCurrentELO} → ${eloChanges.black.newRating} (${eloSystem.formatELOChange(eloChanges.black.change)})`
+            });
+
+            // Add ELO data to game record
+            gameRecord.eloChanges = {
+                red: {
+                    oldRating: eloChanges.red.oldRating,
+                    newRating: eloChanges.red.newRating,
+                    change: eloChanges.red.change
+                },
+                black: {
+                    oldRating: eloChanges.black.oldRating,
+                    newRating: eloChanges.black.newRating,
+                    change: eloChanges.black.change
+                }
+            };
+
+            // Update player profiles with new ELO ratings
+            await updateDoc(redProfileRef, {
+                elo: eloChanges.red.newRating,
+                gamesPlayed: redGamesPlayed + 1,
+                lastGameAt: gameEndTime
+            });
+
+            await updateDoc(blackProfileRef, {
+                elo: eloChanges.black.newRating,
+                gamesPlayed: blackGamesPlayed + 1,
+                lastGameAt: gameEndTime
+            });
+
+            console.log('✅ Player profiles updated with new ELO ratings');
 
             // Import collection and query functions
             const { collection, query, orderBy, limit, getDocs, deleteDoc } = await import('https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js');

@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ELO System Test</title>
+    <style>
+        body { font-family: monospace; padding: 20px; background: #f8fafc; }
+        .test-result {
+            margin: 10px 0;
+            padding: 15px;
+            background: white;
+            border-radius: 8px;
+            border-left: 4px solid #3b82f6;
+        }
+        .test-result.pass { border-left-color: #10b981; }
+        .test-result.info { border-left-color: #f59e0b; }
+        h1 { color: #1e293b; }
+        h2 { color: #475569; margin-top: 30px; }
+        .scenario { background: #f1f5f9; padding: 10px; margin: 5px 0; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <h1>🎯 ELO System Test Suite</h1>
+    <div id="results"></div>
+
+    <script type="module">
+        import { eloSystem } from './elo-system.js';
+
+        const results = document.getElementById('results');
+
+        function log(message, type = 'info') {
+            const div = document.createElement('div');
+            div.className = `test-result ${type}`;
+            div.textContent = message;
+            results.appendChild(div);
+        }
+
+        function testScenario(title, params, expectedApprox) {
+            const result = eloSystem.calculateGameRatings(params);
+
+            const div = document.createElement('div');
+            div.className = 'scenario';
+            div.innerHTML = `
+                <strong>${title}</strong><br>
+                Red: ${params.redPlayer.elo} (${params.redPlayer.gamesPlayed} games) → ${result.red.newRating} (${result.red.change >= 0 ? '+' : ''}${result.red.change})<br>
+                Black: ${params.blackPlayer.elo} (${params.blackPlayer.gamesPlayed} games) → ${result.black.newRating} (${result.black.change >= 0 ? '+' : ''}${result.black.change})<br>
+                Winner: ${params.winner}<br>
+                Expected scores: Red=${result.red.expectedScore.toFixed(3)}, Black=${result.black.expectedScore.toFixed(3)}
+            `;
+            results.appendChild(div);
+
+            return result;
+        }
+
+        log('Starting ELO System Tests...', 'pass');
+
+        // Test 1: Equal ratings
+        log('\n=== Test 1: Equal Ratings (1500 vs 1500, 50 games each) ===');
+        testScenario('Red wins', {
+            redPlayer: { uid: 'red1', elo: 1500, gamesPlayed: 50 },
+            blackPlayer: { uid: 'black1', elo: 1500, gamesPlayed: 50 },
+            winner: 'red'
+        });
+
+        testScenario('Draw', {
+            redPlayer: { uid: 'red1', elo: 1500, gamesPlayed: 50 },
+            blackPlayer: { uid: 'black1', elo: 1500, gamesPlayed: 50 },
+            winner: 'draw'
+        });
+
+        testScenario('Black wins', {
+            redPlayer: { uid: 'red1', elo: 1500, gamesPlayed: 50 },
+            blackPlayer: { uid: 'black1', elo: 1500, gamesPlayed: 50 },
+            winner: 'black'
+        });
+
+        // Test 2: Large gap (300 points)
+        log('\n=== Test 2: Large Gap (Red 1800 vs Black 1500, 80 games each) ===');
+        testScenario('Higher rated (Red) wins', {
+            redPlayer: { uid: 'red2', elo: 1800, gamesPlayed: 80 },
+            blackPlayer: { uid: 'black2', elo: 1500, gamesPlayed: 80 },
+            winner: 'red'
+        });
+
+        testScenario('Draw', {
+            redPlayer: { uid: 'red2', elo: 1800, gamesPlayed: 80 },
+            blackPlayer: { uid: 'black2', elo: 1500, gamesPlayed: 80 },
+            winner: 'draw'
+        });
+
+        testScenario('Lower rated (Black) wins (upset!)', {
+            redPlayer: { uid: 'red2', elo: 1800, gamesPlayed: 80 },
+            blackPlayer: { uid: 'black2', elo: 1500, gamesPlayed: 80 },
+            winner: 'black'
+        });
+
+        // Test 3: Very large gap (500 points) - Anti-sandbagging
+        log('\n=== Test 3: Very Large Gap (Red 2000 vs Black 1500, 120 games each) - Anti-sandbagging ===');
+        testScenario('Higher rated (Red) wins - capped gain', {
+            redPlayer: { uid: 'red3', elo: 2000, gamesPlayed: 120 },
+            blackPlayer: { uid: 'black3', elo: 1500, gamesPlayed: 120 },
+            winner: 'red'
+        });
+
+        testScenario('Lower rated (Black) loses - capped loss', {
+            redPlayer: { uid: 'red3', elo: 2000, gamesPlayed: 120 },
+            blackPlayer: { uid: 'black3', elo: 1500, gamesPlayed: 120 },
+            winner: 'red'
+        });
+
+        testScenario('Lower rated (Black) wins - full reward!', {
+            redPlayer: { uid: 'red3', elo: 2000, gamesPlayed: 120 },
+            blackPlayer: { uid: 'black3', elo: 1500, gamesPlayed: 120 },
+            winner: 'black'
+        });
+
+        // Test 4: New players (high K-factor)
+        log('\n=== Test 4: New Players (K=40) vs Experienced (K=24) ===');
+        testScenario('New player (5 games) vs Experienced (100 games), new wins', {
+            redPlayer: { uid: 'red4', elo: 1200, gamesPlayed: 5 },
+            blackPlayer: { uid: 'black4', elo: 1500, gamesPlayed: 100 },
+            winner: 'red'
+        });
+
+        testScenario('New player (5 games) vs Experienced (100 games), experienced wins', {
+            redPlayer: { uid: 'red4', elo: 1200, gamesPlayed: 5 },
+            blackPlayer: { uid: 'black4', elo: 1500, gamesPlayed: 100 },
+            winner: 'black'
+        });
+
+        // Test 5: Red advantage verification
+        log('\n=== Test 5: Red First-Move Advantage Verification ===');
+        const equalDraw = testScenario('Equal players draw - Red should lose points, Black gain', {
+            redPlayer: { uid: 'red5', elo: 1500, gamesPlayed: 50 },
+            blackPlayer: { uid: 'black5', elo: 1500, gamesPlayed: 50 },
+            winner: 'draw'
+        });
+
+        if (equalDraw.red.change < 0 && equalDraw.black.change > 0) {
+            log('✓ PASS: Draw correctly penalizes Red and rewards Black', 'pass');
+        } else {
+            log('✗ FAIL: Draw should penalize Red and reward Black', 'fail');
+        }
+
+        // Test 6: Rating categories
+        log('\n=== Test 6: Rating Categories ===');
+        log(`800 → ${eloSystem.getRatingCategory(800)}`);
+        log(`1200 → ${eloSystem.getRatingCategory(1200)}`);
+        log(`1500 → ${eloSystem.getRatingCategory(1500)}`);
+        log(`1900 → ${eloSystem.getRatingCategory(1900)}`);
+        log(`2300 → ${eloSystem.getRatingCategory(2300)}`);
+
+        // Test 7: Provisional status
+        log('\n=== Test 7: Provisional Status ===');
+        log(`5 games → Provisional? ${eloSystem.isProvisional(5) ? 'Yes ?' : 'No'}`);
+        log(`29 games → Provisional? ${eloSystem.isProvisional(29) ? 'Yes ?' : 'No'}`);
+        log(`30 games → Provisional? ${eloSystem.isProvisional(30) ? 'Yes ?' : 'No'}`);
+
+        log('\n=== All Tests Complete ===', 'pass');
+    </script>
+</body>
+</html>

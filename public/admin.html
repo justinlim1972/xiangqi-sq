@@ -118,6 +118,7 @@
                     <th>Player Name</th>
                     <th>Email</th>
                     <th>Role</th>
+                    <th>ELO</th>
                     <th>Status</th>
                     <th>Last Login</th>
                     <th>Session Duration</th>
@@ -127,7 +128,7 @@
                 </tr>
             </thead>
             <tbody id="user-table-body">
-                <tr><td colspan="10" style="text-align:center; padding:40px; color:#94a3b8;">Loading user data...</td></tr>
+                <tr><td colspan="11" style="text-align:center; padding:40px; color:#94a3b8;">Loading user data...</td></tr>
             </tbody>
         </table>
     </div>
@@ -990,7 +991,7 @@
             tbody.innerHTML = '';
 
             if (users.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="10" style="text-align:center; padding:40px; color:#94a3b8;"><strong>No users found</strong><br><br>Users will appear here after they:<br>• Register an account<br>• Join a table to play<br><br>Check the browser console for detailed logs.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="11" style="text-align:center; padding:40px; color:#94a3b8;"><strong>No users found</strong><br><br>Users will appear here after they:<br>• Register an account<br>• Join a table to play<br><br>Check the browser console for detailed logs.</td></tr>';
                 return;
             }
 
@@ -1015,11 +1016,16 @@
                     ? `<button class="btn btn-sm" style="background:#ef4444; color:white;" onclick="toggleUserRole('${user.uid}', 'user')">Demote to User</button>`
                     : `<button class="btn btn-sm" style="background:#10b981; color:white;" onclick="toggleUserRole('${user.uid}', 'admin')">Promote to Admin</button>`;
 
+                const elo = user.elo || 1200;
+                const provisional = user.gamesPlayed < 30 ? '?' : '';
+                const eloColor = elo >= 1800 ? '#f59e0b' : (elo >= 1400 ? '#3b82f6' : '#64748b');
+
                 row.innerHTML = `
                     <td style="font-family: monospace; font-size: 0.75rem; color: #64748b;">${user.uid.substring(0, 8)}...</td>
                     <td><strong>${user.playerName}</strong></td>
                     <td>${user.email}</td>
                     <td>${roleBadge}</td>
+                    <td style="text-align: center; font-weight: 700; color: ${eloColor};">${elo}${provisional}</td>
                     <td class="${statusClass}">${statusText}</td>
                     <td>${lastSeenText}</td>
                     <td>${sessionText}</td>
@@ -1366,6 +1372,22 @@ Instructions: Copy this entire report and paste it into your conversation with C
                             <span>📱 ${game.source === 'mobile' ? 'Mobile' : 'PC'}</span>
                             <span>🏁 ${formatReason(game.reason)}</span>
                         </div>
+                        ${game.eloChanges ? `
+                        <div style="display:flex; gap:20px; flex-wrap:wrap; font-size:0.85rem; margin-bottom:12px; padding:10px; background:#f8fafc; border-radius:6px;">
+                            <span style="color:#cd3333; font-weight:600;">
+                                Red: ${game.eloChanges.red.oldRating} → ${game.eloChanges.red.newRating}
+                                <span style="color:${game.eloChanges.red.change >= 0 ? '#10b981' : '#ef4444'}">
+                                    (${game.eloChanges.red.change >= 0 ? '+' : ''}${game.eloChanges.red.change})
+                                </span>
+                            </span>
+                            <span style="color:#000; font-weight:600;">
+                                Black: ${game.eloChanges.black.oldRating} → ${game.eloChanges.black.newRating}
+                                <span style="color:${game.eloChanges.black.change >= 0 ? '#10b981' : '#ef4444'}">
+                                    (${game.eloChanges.black.change >= 0 ? '+' : ''}${game.eloChanges.black.change})
+                                </span>
+                            </span>
+                        </div>
+                        ` : ''}
                         <button class="btn btn-sm" style="background:#3b82f6; color:white;" onclick="viewGameAsAdmin('${game.gameId}', '${game.playerRed?.uid}')">
                             👁️ View Replay
                         </button>

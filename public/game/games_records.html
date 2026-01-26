@@ -497,6 +497,19 @@ class GamesRecordsApp {
 
             const duration = this.formatDuration(game.duration);
 
+            // Get ELO change for this player
+            let eloDisplay = '';
+            if (game.eloChanges) {
+                const myELOChange = iAmRed ? game.eloChanges.red : game.eloChanges.black;
+                const changeColor = myELOChange.change >= 0 ? '#10b981' : '#ef4444';
+                const changeSign = myELOChange.change >= 0 ? '+' : '';
+                eloDisplay = `
+                    <div class="game-detail-item" style="color:${changeColor}; font-weight:700;">
+                        📊 ${myELOChange.oldRating} → ${myELOChange.newRating} (${changeSign}${myELOChange.change})
+                    </div>
+                `;
+            }
+
             html += `
                 <div class="game-card" onclick="app.viewGame('${game.gameId}')">
                     <div class="game-header">
@@ -513,6 +526,7 @@ class GamesRecordsApp {
                         <div class="game-detail-item">⏱️ ${duration}</div>
                         <div class="game-detail-item">📱 ${game.source === 'mobile' ? 'Mobile' : 'PC'}</div>
                         <div class="game-detail-item">🏁 ${this.formatReason(game.reason)}</div>
+                        ${eloDisplay}
                     </div>
                 </div>
             `;
