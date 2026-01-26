@@ -29,7 +29,8 @@
       "Bash(copy:*)",
       "Bash(powershell.exe -Command:*)",
       "Bash(ls:*)",
-      "Bash(cd \"E:\"\" && powershell -Command \"Compress-Archive -Path 'FireBase-SG' -DestinationPath 'FireBase-SG.zip' -Force \")"
+      "Bash(cd \"E:\"\" && powershell -Command \"Compress-Archive -Path 'FireBase-SG' -DestinationPath 'FireBase-SG.zip' -Force \")",
+      "Bash(curl:*)"
     ]
   }
 }

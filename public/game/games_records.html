@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>My Game Records - SG Xiangqi</title>
+    <style>
+        :root {
+            --primary: #cd3333;
+            --dark: #2c3e50;
+            --bg: #f0f2f5;
+            --gold: #f1c40f;
+            --success: #10b981;
+            --info: #3b82f6;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: var(--bg);
+            margin: 0;
+            padding: 0;
+            color: #333;
+        }
+
+        /* Header */
+        header {
+            background: var(--primary);
+            color: white;
+            padding: 15px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+        }
+
+        header h1 {
+            margin: 0;
+            font-size: 1.5rem;
+            font-weight: 900;
+            letter-spacing: -0.5px;
+        }
+
+        .btn-back {
+            background: rgba(255,255,255,0.2);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 700;
+            transition: 0.2s;
+            text-decoration: none;
+        }
+
+        .btn-back:hover {
+            background: rgba(255,255,255,0.3);
+        }
+
+        /* Container */
+        .container {
+            max-width: 1200px;
+            margin: 20px auto;
+            padding: 0 15px;
+        }
+
+        /* Filter Buttons */
+        .filter-bar {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .filter-btn {
+            background: white;
+            border: 2px solid #e2e8f0;
+            color: #334155;
+            padding: 10px 20px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-weight: 700;
+            transition: 0.2s;
+            font-size: 0.9rem;
+        }
+
+        .filter-btn.active {
+            background: var(--primary);
+            color: white;
+            border-color: var(--primary);
+        }
+
+        .filter-btn:hover {
+            transform: translateY(-2px);
+        }
+
+        /* Stats Cards */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 25px;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            text-align: center;
+        }
+
+        .stat-label {
+            font-size: 0.75rem;
+            color: #64748b;
+            text-transform: uppercase;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 900;
+            color: var(--primary);
+        }
+
+        /* Games List */
+        .games-list {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            overflow: hidden;
+        }
+
+        .game-card {
+            padding: 20px;
+            border-bottom: 1px solid #e2e8f0;
+            transition: 0.2s;
+            cursor: pointer;
+        }
+
+        .game-card:last-child {
+            border-bottom: none;
+        }
+
+        .game-card:hover {
+            background: #f8fafc;
+        }
+
+        .game-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .game-players {
+            font-size: 1rem;
+            font-weight: 700;
+            color: #1e293b;
+        }
+
+        .player-red {
+            color: var(--primary);
+        }
+
+        .player-black {
+            color: #000;
+        }
+
+        .game-result {
+            padding: 6px 12px;
+            border-radius: 8px;
+            font-size: 0.75rem;
+            font-weight: 900;
+            text-transform: uppercase;
+        }
+
+        .result-win {
+            background: #dcfce7;
+            color: #166534;
+        }
+
+        .result-loss {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        .result-draw {
+            background: #f1f5f9;
+            color: #475569;
+        }
+
+        .game-details {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            font-size: 0.85rem;
+            color: #64748b;
+        }
+
+        .game-detail-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        /* Loading State */
+        .loading {
+            text-align: center;
+            padding: 60px 20px;
+            color: #94a3b8;
+        }
+
+        .loading-spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid #e2e8f0;
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Empty State */
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #94a3b8;
+        }
+
+        .empty-state-icon {
+            font-size: 4rem;
+            margin-bottom: 20px;
+        }
+
+        .empty-state-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #475569;
+            margin-bottom: 10px;
+        }
+
+        .empty-state-text {
+            font-size: 0.95rem;
+        }
+
+        /* Mobile Responsiveness */
+        @media (max-width: 768px) {
+            header h1 {
+                font-size: 1.2rem;
+            }
+
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            .game-header {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .game-details {
+                flex-direction: column;
+                gap: 8px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>📜 My Game Records</h1>
+    <a href="../lobby/lobby.html" class="btn-back">Back to Lobby</a>
+</header>
+
+<div class="container">
+    <!-- Stats Cards -->
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-label">Total Games</div>
+            <div class="stat-value" id="stat-total">0</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Wins</div>
+            <div class="stat-value" id="stat-wins" style="color: #10b981;">0</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Losses</div>
+            <div class="stat-value" id="stat-losses" style="color: #ef4444;">0</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Draws</div>
+            <div class="stat-value" id="stat-draws" style="color: #64748b;">0</div>
+        </div>
+    </div>
+
+    <!-- Filter Buttons -->
+    <div class="filter-bar">
+        <button class="filter-btn active" onclick="app.filterGames('all')">All Games</button>
+        <button class="filter-btn" onclick="app.filterGames('wins')">Wins Only</button>
+        <button class="filter-btn" onclick="app.filterGames('losses')">Losses Only</button>
+        <button class="filter-btn" onclick="app.filterGames('draws')">Draws Only</button>
+    </div>
+
+    <!-- Games List -->
+    <div class="games-list" id="games-list">
+        <div class="loading">
+            <div class="loading-spinner"></div>
+            <p>Loading your game records...</p>
+        </div>
+    </div>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+import { getFirestore, collection, query, orderBy, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+class GamesRecordsApp {
+    constructor() {
+        const config = {
+            apiKey: "AIzaSyDq_LECOrc4SY90SyDsBQGmwl-YnUNFIj8",
+            authDomain: "xiangqi-sq.firebaseapp.com",
+            databaseURL: "https://xiangqi-sq-default-rtdb.asia-southeast1.firebasedatabase.app",
+            projectId: "xiangqi-sq",
+            storageBucket: "xiangqi-sq.firebasestorage.app",
+            messagingSenderId: "351923336298",
+            appId: "1:351923336298:web:e7278ea095ba085ac4935b"
+        };
+
+        this.fb = initializeApp(config);
+        this.auth = getAuth(this.fb);
+        this.db = getFirestore(this.fb);
+        this.appId = 'sg-xiangqi';
+
+        this.user = null;
+        this.allGames = [];
+        this.currentFilter = 'all';
+
+        this.init();
+    }
+
+    init() {
+        onAuthStateChanged(this.auth, (user) => {
+            if (user) {
+                this.user = user;
+                console.log('User logged in:', user.uid);
+                this.loadGames();
+            } else {
+                console.log('No user logged in, redirecting to lobby...');
+                window.location.href = '../lobby/lobby.html';
+            }
+        });
+    }
+
+    async loadGames() {
+        try {
+            console.log('Loading games for user:', this.user.uid);
+
+            // Query user's game history
+            const historyRef = collection(this.db, 'artifacts', this.appId, 'users', this.user.uid, 'game-history');
+            const historyQuery = query(historyRef, orderBy('completedAt', 'desc'));
+            const snapshot = await getDocs(historyQuery);
+
+            this.allGames = [];
+            snapshot.forEach(doc => {
+                this.allGames.push(doc.data());
+            });
+
+            console.log(`Loaded ${this.allGames.length} games`);
+
+            this.updateStats();
+            this.renderGames();
+
+        } catch (error) {
+            console.error('Error loading games:', error);
+            document.getElementById('games-list').innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-state-icon">❌</div>
+                    <div class="empty-state-title">Error Loading Games</div>
+                    <div class="empty-state-text">${error.message}</div>
+                </div>
+            `;
+        }
+    }
+
+    updateStats() {
+        let wins = 0;
+        let losses = 0;
+        let draws = 0;
+
+        this.allGames.forEach(game => {
+            const iAmRed = game.playerRed.uid === this.user.uid;
+            const iAmBlack = game.playerBlack.uid === this.user.uid;
+            const myColor = iAmRed ? 'red' : 'black';
+
+            if (game.winner === 'draw') {
+                draws++;
+            } else if (game.winner === myColor) {
+                wins++;
+            } else {
+                losses++;
+            }
+        });
+
+        document.getElementById('stat-total').textContent = this.allGames.length;
+        document.getElementById('stat-wins').textContent = wins;
+        document.getElementById('stat-losses').textContent = losses;
+        document.getElementById('stat-draws').textContent = draws;
+    }
+
+    filterGames(filter) {
+        this.currentFilter = filter;
+
+        // Update active button
+        document.querySelectorAll('.filter-btn').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        event.target.classList.add('active');
+
+        this.renderGames();
+    }
+
+    renderGames() {
+        const container = document.getElementById('games-list');
+
+        // Filter games
+        let gamesToShow = this.allGames;
+
+        if (this.currentFilter !== 'all') {
+            gamesToShow = this.allGames.filter(game => {
+                const iAmRed = game.playerRed.uid === this.user.uid;
+                const myColor = iAmRed ? 'red' : 'black';
+
+                if (this.currentFilter === 'wins') {
+                    return game.winner === myColor;
+                } else if (this.currentFilter === 'losses') {
+                    return game.winner !== 'draw' && game.winner !== myColor;
+                } else if (this.currentFilter === 'draws') {
+                    return game.winner === 'draw';
+                }
+                return true;
+            });
+        }
+
+        if (gamesToShow.length === 0) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-state-icon">🎮</div>
+                    <div class="empty-state-title">No Games Found</div>
+                    <div class="empty-state-text">
+                        ${this.currentFilter === 'all'
+                            ? 'Play some games to see your history here!'
+                            : `No ${this.currentFilter} recorded yet.`}
+                    </div>
+                </div>
+            `;
+            return;
+        }
+
+        let html = '';
+
+        gamesToShow.forEach(game => {
+            const iAmRed = game.playerRed.uid === this.user.uid;
+            const iAmBlack = game.playerBlack.uid === this.user.uid;
+            const myColor = iAmRed ? 'red' : 'black';
+            const opponent = iAmRed ? game.playerBlack : game.playerRed;
+
+            let resultClass = 'result-draw';
+            let resultText = 'DRAW';
+
+            if (game.winner !== 'draw') {
+                if (game.winner === myColor) {
+                    resultClass = 'result-win';
+                    resultText = 'WIN';
+                } else {
+                    resultClass = 'result-loss';
+                    resultText = 'LOSS';
+                }
+            }
+
+            const gameDate = new Date(game.completedAt).toLocaleDateString('en-SG', {
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+
+            const duration = this.formatDuration(game.duration);
+
+            html += `
+                <div class="game-card" onclick="app.viewGame('${game.gameId}')">
+                    <div class="game-header">
+                        <div class="game-players">
+                            <span class="player-red">${game.playerRed.playerName}</span>
+                            <span> vs </span>
+                            <span class="player-black">${game.playerBlack.playerName}</span>
+                        </div>
+                        <div class="game-result ${resultClass}">${resultText}</div>
+                    </div>
+                    <div class="game-details">
+                        <div class="game-detail-item">📅 ${gameDate}</div>
+                        <div class="game-detail-item">🎯 ${game.totalMoves} moves</div>
+                        <div class="game-detail-item">⏱️ ${duration}</div>
+                        <div class="game-detail-item">📱 ${game.source === 'mobile' ? 'Mobile' : 'PC'}</div>
+                        <div class="game-detail-item">🏁 ${this.formatReason(game.reason)}</div>
+                    </div>
+                </div>
+            `;
+        });
+
+        container.innerHTML = html;
+    }
+
+    formatDuration(ms) {
+        const minutes = Math.floor(ms / 60000);
+        if (minutes < 60) {
+            return `${minutes}m`;
+        }
+        const hours = Math.floor(minutes / 60);
+        const remainingMinutes = minutes % 60;
+        return `${hours}h ${remainingMinutes}m`;
+    }
+
+    formatReason(reason) {
+        const reasons = {
+            'checkmate': 'Checkmate',
+            'resignation': 'Resignation',
+            'draw': 'Draw',
+            'timeout': 'Timeout',
+            'perpetual-check': 'Perpetual Check',
+            'perpetual-chase': 'Perpetual Chase',
+            'stalemate': 'Stalemate'
+        };
+        return reasons[reason] || reason;
+    }
+
+    viewGame(gameId) {
+        window.location.href = `game_preview.html?id=${gameId}`;
+    }
+}
+
+// Initialize app
+window.app = new GamesRecordsApp();
+</script>
+
+</body>
+</html>

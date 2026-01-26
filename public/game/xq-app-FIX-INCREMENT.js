@@ -644,6 +644,9 @@ export class XQApp {
             })
         }, { merge: true });
 
+        // Save game to history
+        await this.saveGameToHistory(winner, 'timeout');
+
         this.showStatus(`${color.toUpperCase()} ran out of time!`, "red");
     }
 
@@ -2410,6 +2413,12 @@ export class XQApp {
 
         await setDoc(gameRef, updateData, { merge: true });
 
+        // Save game to history if game ended
+        if (newStatus !== 'playing') {
+            const gameWinner = winner || 'draw';
+            await this.saveGameToHistory(gameWinner, newStatus);
+        }
+
         // Clear selection
         this.selectedPiece = null;
         this.validMoves = [];
@@ -2456,6 +2465,9 @@ export class XQApp {
                 ts: resignationTime
             })
         }, { merge: true });
+
+        // Save game to history
+        await this.saveGameToHistory(winner, 'resignation');
 
         this.showStatus("You have resigned", "red");
     }
@@ -2506,6 +2518,9 @@ export class XQApp {
                 ts: Date.now()
             })
         }, { merge: true });
+
+        // Save game to history
+        await this.saveGameToHistory('draw', 'draw');
 
         // Clear draw offer
         const tRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'regions', this.rid, 'tables', this.tid);
@@ -3598,6 +3613,186 @@ export class XQApp {
         } catch (e) {
             console.error('Error submitting bug report:', e);
             alert('Failed to submit bug report: ' + e.message);
+        }
+    }
+
+    // === GAME HISTORY RECORDING SYSTEM ===
+
+    /**
+     * Convert ICCS move notation to Chinese Xiangqi notation
+     * @param {object} move - Move data with from/to coordinates and piece
+     * @param {number} moveIndex - Move number in the game
+     * @returns {string} - Chinese notation (e.g., "炮二平五" or "C24")
+     */
+    moveToChineseNotation(move, moveIndex) {
+        // For now, return simplified algebraic notation
+        // This can be enhanced later with proper Chinese characters
+        const { from, to, piece, isCapture } = move;
+
+        // Convert piece code to letter
+        const pieceMap = {
+            'R': 'R', 'r': 'R', // Chariot (Rook)
+            'H': 'H', 'h': 'H', // Horse (Knight)
+            'E': 'E', 'e': 'E', // Elephant (Bishop)
+            'A': 'A', 'a': 'A', // Advisor (Guard)
+            'K': 'K', 'k': 'K', // King (General)
+            'C': 'C', 'c': 'C', // Cannon
+            'P': 'P', 'p': 'P'  // Pawn (Soldier)
+        };
+
+        const pieceLetter = pieceMap[piece] || piece;
+        const fromFile = from.x;
+        const fromRank = from.y;
+        const toFile = to.x;
+        const toRank = to.y;
+
+        // Determine movement direction
+        let direction;
+        if (fromFile === toFile) {
+            direction = fromRank < toRank ? '+' : '-'; // Forward or backward
+        } else {
+            direction = '='; // Horizontal
+        }
+
+        // Calculate distance
+        const distance = Math.abs(fromFile - toFile) + Math.abs(fromRank - toRank);
+
+        // Return simplified notation (e.g., "C24", "H2+3")
+        return `${pieceLetter}${fromFile}${direction}${distance}`;
+    }
+
+    /**
+     * Convert move data to ICCS format (from-to squares)
+     * @param {object} move - Move data with from/to coordinates
+     * @returns {string} - ICCS notation (e.g., "h2e2")
+     */
+    moveToICCS(move) {
+        const { from, to } = move;
+        const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i'];
+        return `${files[from.x]}${9 - from.y}${files[to.x]}${9 - to.y}`;
+    }
+
+    /**
+     * Save completed game to players' history
+     * Stores up to 500 games per player, auto-purging oldest games
+     * @param {string} winner - 'red', 'black', or 'draw'
+     * @param {string} reason - 'checkmate', 'resignation', 'draw', 'timeout', etc.
+     */
+    async saveGameToHistory(winner, reason) {
+        try {
+            console.log('💾 Saving game to history...', { winner, reason });
+
+            // Ensure both players exist
+            if (!this.table?.playerRed?.uid || !this.table?.playerBlack?.uid) {
+                console.log('⚠️ Cannot save game - missing player data');
+                return;
+            }
+
+            const redPlayer = this.table.playerRed;
+            const blackPlayer = this.table.playerBlack;
+
+            // Get game data
+            const gameRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'games', this.tid);
+            const gameSnap = await getDoc(gameRef);
+
+            if (!gameSnap.exists()) {
+                console.log('⚠️ Game data not found');
+                return;
+            }
+
+            const gameData = gameSnap.data();
+            const history = gameData.history || [];
+
+            if (history.length === 0) {
+                console.log('⚠️ No moves to save - game has no history');
+                return;
+            }
+
+            // Convert history to both ICCS and Chinese notation
+            const movesICCS = history.map(move => this.moveToICCS(move));
+            const movesChinese = history.map((move, index) => this.moveToChineseNotation(move, index));
+
+            // Get initial FEN (standard starting position)
+            const fenStart = "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1";
+
+            // Get final FEN from current board state
+            const fenEnd = this.engine.boardToFEN(this.gameState.board, this.gameState.turn);
+
+            // Calculate game duration (using timestamps if available)
+            const gameStartTime = gameData.startedAt || Date.now();
+            const gameEndTime = Date.now();
+            const duration = gameEndTime - gameStartTime;
+
+            // Determine source (PC or mobile)
+            const isMobile = /Mobi|Android/i.test(navigator.userAgent);
+            const source = isMobile ? 'mobile' : 'pc';
+
+            // Create game record
+            const gameRecord = {
+                gameId: this.tid,
+                regionId: this.rid,
+                playerRed: {
+                    uid: redPlayer.uid,
+                    playerName: redPlayer.playerName || redPlayer.name || 'Red Player',
+                    email: redPlayer.email || ''
+                },
+                playerBlack: {
+                    uid: blackPlayer.uid,
+                    playerName: blackPlayer.playerName || blackPlayer.name || 'Black Player',
+                    email: blackPlayer.email || ''
+                },
+                winner: winner, // 'red', 'black', or 'draw'
+                reason: reason, // 'checkmate', 'resignation', 'draw', 'timeout', etc.
+                completedAt: gameEndTime,
+                movesICCS: movesICCS,
+                movesChinese: movesChinese,
+                fenStart: fenStart,
+                fenEnd: fenEnd,
+                totalMoves: history.length,
+                duration: duration,
+                source: source
+            };
+
+            console.log('📝 Game record prepared:', {
+                gameId: this.tid,
+                players: `${redPlayer.playerName} vs ${blackPlayer.playerName}`,
+                moves: history.length,
+                winner: winner
+            });
+
+            // Import collection and query functions
+            const { collection, query, orderBy, limit, getDocs, deleteDoc } = await import('https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js');
+
+            // Save to both players' history
+            for (const player of [redPlayer, blackPlayer]) {
+                const historyRef = doc(this.db, 'artifacts', this.appId, 'users', player.uid, 'game-history', this.tid);
+
+                await setDoc(historyRef, gameRecord);
+                console.log(`✅ Game saved to ${player.playerName}'s history`);
+
+                // Check if player has more than 500 games
+                const playerHistoryRef = collection(this.db, 'artifacts', this.appId, 'users', player.uid, 'game-history');
+                const historyQuery = query(playerHistoryRef, orderBy('completedAt', 'desc'));
+                const historySnap = await getDocs(historyQuery);
+
+                if (historySnap.size > 500) {
+                    // Delete oldest games beyond 500
+                    const gamesToDelete = historySnap.size - 500;
+                    console.log(`🗑️ Purging ${gamesToDelete} oldest games for ${player.playerName}`);
+
+                    const allGames = historySnap.docs;
+                    for (let i = 500; i < allGames.length; i++) {
+                        await deleteDoc(allGames[i].ref);
+                    }
+                    console.log(`✅ Purged ${gamesToDelete} old games`);
+                }
+            }
+
+            console.log('✅ Game history saved successfully for both players');
+
+        } catch (error) {
+            console.error('❌ Error saving game to history:', error);
+            // Don't alert user - this is a background operation
         }
     }
 }

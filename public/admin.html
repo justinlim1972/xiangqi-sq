@@ -81,6 +81,7 @@
         <button class="btn" style="background:var(--gold); color:#000; font-weight:900;" onclick="forceFixOrdering()">🔧 Fix Region Order</button>
         <button class="btn" style="background:#10b981; color:white; font-weight:900;" onclick="toggleUserManagement()">👥 User Management</button>
         <button class="btn" style="background:#ef4444; color:white; font-weight:900;" onclick="toggleBugReports()">🐛 Bug Reports</button>
+        <button class="btn" style="background:#3b82f6; color:white; font-weight:900;" onclick="toggleGameRecords()">📜 Game Records</button>
         <button class="btn" style="background:rgba(255,255,255,0.2); color:white;" onclick="window.location.href=window.location.origin + '/lobby/lobby.html'">Exit to Lobby</button>
     </div>
 </header>
@@ -139,6 +140,17 @@
         </h2>
         <div id="bug-reports-container" style="margin-top:20px;">
             <p style="text-align:center; padding:40px; color:#94a3b8;">Loading bug reports...</p>
+        </div>
+    </div>
+
+    <!-- GAME RECORDS SECTION (Hidden by default) -->
+    <div id="game-records-section" class="card full-width" style="display:none;">
+        <h2>
+            📜 Game Records (All Players)
+            <button class="btn btn-sm" style="background:#64748b; color:white;" onclick="toggleGameRecords()">Back to Region Management</button>
+        </h2>
+        <div id="game-records-container" style="margin-top:20px;">
+            <p style="text-align:center; padding:40px; color:#94a3b8;">Loading game records...</p>
         </div>
     </div>
 
@@ -1221,6 +1233,177 @@ Instructions: Copy this entire report and paste it into your conversation with C
             console.error('Export error:', e);
             alert('Error exporting report: ' + e.message);
         }
+    };
+
+    // === GAME RECORDS MANAGEMENT ===
+    window.toggleGameRecords = () => {
+        const gameRecordsSection = document.getElementById('game-records-section');
+        const userSection = document.getElementById('user-management-section');
+        const bugSection = document.getElementById('bug-reports-section');
+        const regionColumn = document.getElementById('region-column');
+        const tablesColumn = document.getElementById('tables-column');
+
+        if (gameRecordsSection.style.display === 'none') {
+            // Show game records
+            gameRecordsSection.style.display = 'block';
+            userSection.style.display = 'none';
+            bugSection.style.display = 'none';
+            regionColumn.style.display = 'none';
+            tablesColumn.style.display = 'none';
+            loadGameRecords();
+        } else {
+            // Hide game records
+            gameRecordsSection.style.display = 'none';
+            regionColumn.style.display = 'block';
+            tablesColumn.style.display = 'block';
+        }
+    };
+
+    async function loadGameRecords() {
+        const container = document.getElementById('game-records-container');
+        container.innerHTML = '<p style="text-align:center; padding:40px; color:#94a3b8;">Loading game records...</p>';
+
+        try {
+            console.log('📊 Loading all game records for admin...');
+
+            // Get all users first
+            const usernamesRef = collection(db, 'artifacts', appId, 'public', 'data', 'usernames');
+            const usernamesSnap = await getDocs(usernamesRef);
+
+            console.log(`📋 Found ${usernamesSnap.size} registered users`);
+
+            const allGames = [];
+            let processedUsers = 0;
+
+            // For each user, get their game history
+            for (const usernameDoc of usernamesSnap.docs) {
+                const userData = usernameDoc.data();
+                const uid = userData.uid;
+
+                if (!uid) continue;
+
+                try {
+                    const historyRef = collection(db, 'artifacts', appId, 'users', uid, 'game-history');
+                    const historySnap = await getDocs(historyRef);
+
+                    historySnap.forEach(doc => {
+                        const gameData = doc.data();
+                        // Only add unique games (check if gameId already exists)
+                        if (!allGames.find(g => g.gameId === gameData.gameId)) {
+                            allGames.push(gameData);
+                        }
+                    });
+
+                    processedUsers++;
+                    if (processedUsers % 10 === 0) {
+                        console.log(`📥 Processed ${processedUsers}/${usernamesSnap.size} users, found ${allGames.length} games so far...`);
+                    }
+                } catch (err) {
+                    console.log(`⚠️ Cannot read game history for user ${uid}:`, err.message);
+                }
+            }
+
+            console.log(`✅ Loaded ${allGames.length} unique games from ${processedUsers} users`);
+
+            // Sort by completion time (newest first)
+            allGames.sort((a, b) => b.completedAt - a.completedAt);
+
+            if (allGames.length === 0) {
+                container.innerHTML = `
+                    <div style="text-align:center; padding:60px 20px;">
+                        <div style="font-size:3rem; margin-bottom:15px;">🎮</div>
+                        <h3 style="color:#64748b; font-weight:700;">No Games Recorded Yet</h3>
+                        <p style="color:#94a3b8; font-size:0.9rem;">Games will appear here after players complete matches.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            // Limit to most recent 100 games for performance
+            const gamesToShow = allGames.slice(0, 100);
+            if (allGames.length > 100) {
+                console.log(`📊 Showing most recent 100 of ${allGames.length} total games`);
+            }
+
+            let html = `
+                <div style="margin-bottom:15px; padding:12px; background:#f1f5f9; border-radius:8px; color:#475569; font-size:0.9rem;">
+                    <strong>📊 Total Games:</strong> ${allGames.length} |
+                    <strong>👥 Players:</strong> ${processedUsers} |
+                    <strong>📄 Showing:</strong> ${gamesToShow.length} most recent
+                </div>
+                <div style="display:flex; flex-direction:column; gap:12px;">
+            `;
+
+            gamesToShow.forEach(game => {
+                const gameDate = new Date(game.completedAt).toLocaleString();
+                // Convert milliseconds to seconds for formatDuration
+                const durationSeconds = Math.floor((game.duration || 0) / 1000);
+                const duration = formatDuration(durationSeconds);
+                const resultText = game.winner === 'draw' ? 'Draw' : `${game.winner.toUpperCase()} wins`;
+                const resultColor = game.winner === 'draw' ? '#64748b' : (game.winner === 'red' ? '#cd3333' : '#000');
+
+                html += `
+                    <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; padding:20px;">
+                        <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:12px; flex-wrap:wrap; gap:10px;">
+                            <div>
+                                <h3 style="margin:0 0 8px 0; color:#1e293b;">
+                                    <span style="color:#cd3333; font-weight:900;">${game.playerRed?.playerName || 'Red'}</span>
+                                    <span style="color:#64748b;"> vs </span>
+                                    <span style="color:#000; font-weight:900;">${game.playerBlack?.playerName || 'Black'}</span>
+                                </h3>
+                                <div style="font-size:0.85rem; color:#64748b;">
+                                    <span><strong>Game ID:</strong> ${game.gameId}</span> |
+                                    <span><strong>Date:</strong> ${gameDate}</span>
+                                </div>
+                            </div>
+                            <div style="padding:8px 16px; background:${resultColor}15; border:2px solid ${resultColor}; border-radius:8px; font-weight:900; color:${resultColor};">
+                                ${resultText}
+                            </div>
+                        </div>
+                        <div style="display:flex; gap:20px; flex-wrap:wrap; font-size:0.85rem; color:#64748b; margin-bottom:12px;">
+                            <span>🎯 ${game.totalMoves || 0} moves</span>
+                            <span>⏱️ ${duration}</span>
+                            <span>📱 ${game.source === 'mobile' ? 'Mobile' : 'PC'}</span>
+                            <span>🏁 ${formatReason(game.reason)}</span>
+                        </div>
+                        <button class="btn btn-sm" style="background:#3b82f6; color:white;" onclick="viewGameAsAdmin('${game.gameId}', '${game.playerRed?.uid}')">
+                            👁️ View Replay
+                        </button>
+                    </div>
+                `;
+            });
+
+            html += '</div>';
+            container.innerHTML = html;
+
+        } catch (e) {
+            console.error('❌ Error loading game records:', e);
+            container.innerHTML = `
+                <div style="text-align:center; padding:40px; color:#ef4444;">
+                    <h3 style="margin-top:0;">Error Loading Game Records</h3>
+                    <p style="font-size:0.9rem; color:#64748b;">${e.message}</p>
+                    <p style="font-size:0.85rem; color:#94a3b8; margin-top:15px;">Check console for details.</p>
+                </div>
+            `;
+        }
+    }
+
+    function formatReason(reason) {
+        const reasons = {
+            'checkmate': 'Checkmate',
+            'resignation': 'Resignation',
+            'draw': 'Draw',
+            'timeout': 'Timeout',
+            'perpetual-check': 'Perpetual Check',
+            'perpetual-chase': 'Perpetual Chase',
+            'stalemate': 'Stalemate'
+        };
+        return reasons[reason] || reason;
+    }
+
+    window.viewGameAsAdmin = (gameId, userId) => {
+        // Admin views game from the player's history
+        window.open(`/game/game_preview.html?id=${gameId}&uid=${userId}`, '_blank');
     };
 </script>
 </body>

@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Game Replay - SG Xiangqi</title>
+    <style>
+        :root {
+            --primary: #cd3333;
+            --dark: #2c3e50;
+            --bg: #f0f2f5;
+            --gold: #f1c40f;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: var(--bg);
+            margin: 0;
+            padding: 0;
+            color: #333;
+        }
+
+        /* Header */
+        header {
+            background: var(--primary);
+            color: white;
+            padding: 15px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+        }
+
+        header h1 {
+            margin: 0;
+            font-size: 1.2rem;
+            font-weight: 900;
+        }
+
+        .btn-back {
+            background: rgba(255,255,255,0.2);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 700;
+            text-decoration: none;
+        }
+
+        /* Game Info Card */
+        .game-info {
+            background: white;
+            padding: 20px;
+            margin: 20px;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+        }
+
+        .players-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .player-info {
+            flex: 1;
+            text-align: center;
+        }
+
+        .player-name {
+            font-size: 1.1rem;
+            font-weight: 700;
+        }
+
+        .player-red .player-name {
+            color: var(--primary);
+        }
+
+        .player-black .player-name {
+            color: #000;
+        }
+
+        .vs-label {
+            font-size: 0.9rem;
+            color: #64748b;
+            font-weight: 700;
+        }
+
+        .game-meta {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+            font-size: 0.85rem;
+            color: #64748b;
+            justify-content: center;
+        }
+
+        /* Board and Sidebar Layout */
+        .game-container {
+            display: flex;
+            max-width: 1400px;
+            margin: 0 auto 20px;
+            gap: 20px;
+            padding: 0 20px;
+        }
+
+        .board-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        #board-container {
+            width: 100%;
+            max-width: 600px;
+            aspect-ratio: 9/10;
+            position: relative;
+        }
+
+        #board-svg {
+            width: 100%;
+            height: 100%;
+        }
+
+        .sidebar {
+            width: 350px;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            padding: 20px;
+            height: fit-content;
+        }
+
+        .sidebar-title {
+            font-size: 1rem;
+            font-weight: 900;
+            color: var(--dark);
+            margin-bottom: 15px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        /* Move History */
+        .moves-list {
+            max-height: 400px;
+            overflow-y: auto;
+            margin-bottom: 20px;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+        }
+
+        .move-item {
+            padding: 10px 15px;
+            border-bottom: 1px solid #e2e8f0;
+            cursor: pointer;
+            transition: 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .move-item:last-child {
+            border-bottom: none;
+        }
+
+        .move-item:hover {
+            background: #f8fafc;
+        }
+
+        .move-item.active {
+            background: #fef3c7;
+            font-weight: 700;
+        }
+
+        .move-number {
+            font-size: 0.75rem;
+            color: #64748b;
+            font-weight: 700;
+            min-width: 30px;
+        }
+
+        .move-notation {
+            font-size: 0.9rem;
+            color: #1e293b;
+        }
+
+        /* Replay Controls */
+        .replay-controls {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin-top: 20px;
+        }
+
+        .control-btn {
+            background: var(--primary);
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 700;
+            font-size: 0.9rem;
+            transition: 0.2s;
+        }
+
+        .control-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(205, 51, 51, 0.3);
+        }
+
+        .control-btn:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* Loading */
+        .loading {
+            text-align: center;
+            padding: 60px 20px;
+        }
+
+        .loading-spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid #e2e8f0;
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Mobile Responsive */
+        @media (max-width: 1024px) {
+            .game-container {
+                flex-direction: column;
+            }
+
+            .sidebar {
+                width: 100%;
+            }
+
+            #board-container {
+                max-width: 100%;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .game-info,
+            .game-container {
+                margin: 10px;
+                padding: 0 10px;
+            }
+
+            .game-meta {
+                flex-direction: column;
+                gap: 8px;
+            }
+
+            .replay-controls {
+                flex-wrap: wrap;
+            }
+
+            .control-btn {
+                flex: 1;
+                min-width: 80px;
+                padding: 10px 15px;
+                font-size: 0.8rem;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>🎬 Game Replay</h1>
+    <a href="games_records.html" class="btn-back">Back to Records</a>
+</header>
+
+<div id="content">
+    <div class="loading">
+        <div class="loading-spinner"></div>
+        <p>Loading game...</p>
+    </div>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+import { getFirestore, doc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+import { XQEngine } from "./xq-engine.js";
+import { XQUI } from "./xq-ui.js?v=107";
+
+class GamePreviewApp {
+    constructor() {
+        const config = {
+            apiKey: "AIzaSyDq_LECOrc4SY90SyDsBQGmwl-YnUNFIj8",
+            authDomain: "xiangqi-sq.firebaseapp.com",
+            databaseURL: "https://xiangqi-sq-default-rtdb.asia-southeast1.firebasedatabase.app",
+            projectId: "xiangqi-sq",
+            storageBucket: "xiangqi-sq.firebasestorage.app",
+            messagingSenderId: "351923336298",
+            appId: "1:351923336298:web:e7278ea095ba085ac4935b"
+        };
+
+        this.fb = initializeApp(config);
+        this.auth = getAuth(this.fb);
+        this.db = getFirestore(this.fb);
+        this.appId = 'sg-xiangqi';
+
+        this.user = null;
+        this.gameData = null;
+        this.currentMoveIndex = -1; // -1 means starting position
+        this.engine = new XQEngine();
+        this.ui = new XQUI();
+
+        const params = new URLSearchParams(window.location.search);
+        this.gameId = params.get('id');
+        this.targetUserId = params.get('uid'); // For admin viewing other players' games
+
+        this.init();
+    }
+
+    init() {
+        onAuthStateChanged(this.auth, (user) => {
+            if (user) {
+                this.user = user;
+                this.loadGame();
+            } else {
+                window.location.href = '../lobby/lobby.html';
+            }
+        });
+    }
+
+    async loadGame() {
+        try {
+            console.log('Loading game:', this.gameId);
+
+            // Determine which user's history to load from
+            // If targetUserId is provided (admin viewing), use that; otherwise use current user
+            const userId = this.targetUserId || this.user.uid;
+            console.log('Loading from user:', userId);
+
+            // Load game from user's history
+            const gameRef = doc(this.db, 'artifacts', this.appId, 'users', userId, 'game-history', this.gameId);
+            const gameSnap = await getDoc(gameRef);
+
+            if (!gameSnap.exists()) {
+                throw new Error('Game not found');
+            }
+
+            this.gameData = gameSnap.data();
+            console.log('Game loaded:', this.gameData);
+
+            this.renderPage();
+            this.initBoard();
+            this.showMove(0); // Show first move
+
+        } catch (error) {
+            console.error('Error loading game:', error);
+            document.getElementById('content').innerHTML = `
+                <div style="text-align:center; padding:60px 20px; color:#ef4444;">
+                    <h2>Error Loading Game</h2>
+                    <p>${error.message}</p>
+                    <a href="games_records.html" class="btn-back" style="display:inline-block; margin-top:20px;">Back to Records</a>
+                </div>
+            `;
+        }
+    }
+
+    renderPage() {
+        const game = this.gameData;
+        const gameDate = new Date(game.completedAt).toLocaleString('en-SG', {
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
+        });
+
+        const duration = this.formatDuration(game.duration);
+        const resultText = game.winner === 'draw' ? 'Draw' : `${game.winner.toUpperCase()} wins`;
+
+        let movesHtml = '';
+        game.movesChinese.forEach((move, index) => {
+            const moveNum = Math.floor(index / 2) + 1;
+            const isRedMove = index % 2 === 0;
+            movesHtml += `
+                <div class="move-item" onclick="app.showMove(${index})">
+                    <span class="move-number">${moveNum}.${isRedMove ? '' : '..'}</span>
+                    <span class="move-notation">${move}</span>
+                </div>
+            `;
+        });
+
+        document.getElementById('content').innerHTML = `
+            <div class="game-info">
+                <div class="players-bar">
+                    <div class="player-info player-red">
+                        <div class="player-name">🔴 ${game.playerRed.playerName}</div>
+                    </div>
+                    <div class="vs-label">VS</div>
+                    <div class="player-info player-black">
+                        <div class="player-name">⚫ ${game.playerBlack.playerName}</div>
+                    </div>
+                </div>
+                <div class="game-meta">
+                    <div>📅 ${gameDate}</div>
+                    <div>🎯 ${game.totalMoves} moves</div>
+                    <div>⏱️ ${duration}</div>
+                    <div>🏁 ${resultText}</div>
+                    <div>📱 ${game.source === 'mobile' ? 'Mobile' : 'PC'}</div>
+                </div>
+            </div>
+
+            <div class="game-container">
+                <div class="board-area">
+                    <div id="board-container">
+                        <svg id="board-svg" viewBox="0 0 900 1000"></svg>
+                    </div>
+                    <div class="replay-controls">
+                        <button class="control-btn" onclick="app.firstMove()">⏮ First</button>
+                        <button class="control-btn" onclick="app.prevMove()">◀ Prev</button>
+                        <button class="control-btn" onclick="app.nextMove()">Next ▶</button>
+                        <button class="control-btn" onclick="app.lastMove()">Last ⏭</button>
+                    </div>
+                </div>
+
+                <div class="sidebar">
+                    <div class="sidebar-title">Move History</div>
+                    <div class="moves-list">
+                        ${movesHtml}
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    initBoard() {
+        // Initialize board with starting position
+        this.board = this.engine.getStartingBoard();
+        this.ui.drawGrid('board-svg', '#a0522d');
+    }
+
+    showMove(moveIndex) {
+        if (moveIndex < -1 || moveIndex >= this.gameData.movesICCS.length) return;
+
+        this.currentMoveIndex = moveIndex;
+
+        // Replay moves from start
+        this.board = this.engine.getStartingBoard();
+
+        for (let i = 0; i <= moveIndex; i++) {
+            const iccs = this.gameData.movesICCS[i];
+            const from = this.parseICCS(iccs.substring(0, 2));
+            const to = this.parseICCS(iccs.substring(2, 4));
+
+            // Apply move
+            this.board[to.y][to.x] = this.board[from.y][from.x];
+            this.board[from.y][from.x] = null;
+        }
+
+        // Render board
+        this.ui.renderPieces('board-svg', this.board, 'ivory');
+
+        // Highlight current move in list
+        document.querySelectorAll('.move-item').forEach((item, index) => {
+            if (index === moveIndex) {
+                item.classList.add('active');
+                item.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            } else {
+                item.classList.remove('active');
+            }
+        });
+    }
+
+    parseICCS(notation) {
+        // Convert ICCS notation (e.g., "h2") to board coordinates
+        const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i'];
+        const x = files.indexOf(notation[0]);
+        const y = 9 - parseInt(notation[1]);
+        return { x, y };
+    }
+
+    firstMove() {
+        this.showMove(0);
+    }
+
+    prevMove() {
+        if (this.currentMoveIndex > 0) {
+            this.showMove(this.currentMoveIndex - 1);
+        }
+    }
+
+    nextMove() {
+        if (this.currentMoveIndex < this.gameData.movesICCS.length - 1) {
+            this.showMove(this.currentMoveIndex + 1);
+        }
+    }
+
+    lastMove() {
+        this.showMove(this.gameData.movesICCS.length - 1);
+    }
+
+    formatDuration(ms) {
+        const minutes = Math.floor(ms / 60000);
+        if (minutes < 60) {
+            return `${minutes} minutes`;
+        }
+        const hours = Math.floor(minutes / 60);
+        const remainingMinutes = minutes % 60;
+        return `${hours}h ${remainingMinutes}m`;
+    }
+}
+
+// Initialize app
+window.app = new GamePreviewApp();
+</script>
+
+</body>
+</html>

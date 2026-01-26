@@ -1,0 +1,78 @@
+I'll propose a comprehensive ELO rating system for your Xiangqi application. Let me analyze the best practices and make recommendations:
+
+ELO System Recommendations
+1. Base K-Factor (Rating Change Magnitude)
+New players (< 30 games): K = 40 (faster rating adjustment)
+Intermediate players (30-100 games): K = 32
+Experienced players (> 100 games): K = 24 (more stable ratings)
+2. Draw Handling in Xiangqi
+This is crucial for Xiangqi! Unlike Western chess where a draw is often equal, in Xiangqi:
+
+Red has first-move advantage (approximately 52-55% win rate in professional games)
+
+Therefore:
+
+Red draws with Black: Red loses ~3-5 ELO, Black gains ~3-5 ELO
+Black draws with Red: Considered a good result for Black
+This is because drawing as Black against the first-move advantage is actually an achievement.
+
+3. Expected Score Formula
+Expected Score (Red) = 1 / (1 + 10^((Black_ELO - Red_ELO) / 400))
+Expected Score (Black) = 1 / (1 + 10^((Red_ELO - Black_ELO + 25) / 400))
+
+Note: +25 points added to Black's calculation to account for Red's first-move advantage
+
+4. Rating Change Formula
+New Rating = Old Rating + K × (Actual Score - Expected Score)
+
+Where Actual Score:
+- Win = 1.0
+- Draw as Red = 0.45 (slightly penalized)
+- Draw as Black = 0.55 (slightly rewarded)
+- Loss = 0.0
+
+5. Anti-Sandbagging Protection
+When ELO gap > 400 points:
+
+High-rated player loses: Normal full penalty (they should have won)
+High-rated player wins: Minimal gain (capped at K × 0.1, so ~2-4 points max)
+Low-rated player wins: Full reward (giant-killer bonus)
+Low-rated player loses: Minimal loss (capped at K × 0.1)
+6. Starting ELO
+All new players start at 1200 ELO
+Rating floor: 400 ELO (prevents negative ratings)
+Provisional status: First 30 games marked as "Provisional"
+7. Example Calculations
+Scenario 1: Equal ratings (both 1500 ELO, K=32)
+
+Red wins: +16 ELO (Red), -16 ELO (Black)
+Draw: -2 ELO (Red), +2 ELO (Black) ← accounting for Red advantage
+Black wins: -16 ELO (Red), +16 ELO (Black)
+Scenario 2: Red 1800, Black 1500 (300 point gap, K=24)
+
+Red expected to win 85% of the time
+Red wins: +4 ELO (Red), -4 ELO (Black)
+Draw: -8 ELO (Red), +8 ELO (Black) ← Red underperformed
+Black wins: -20 ELO (Red), +20 ELO (Black) ← Major upset
+Scenario 3: Red 2000, Black 1500 (500 point gap, K=24)
+
+Red expected to win 95% of the time
+Red wins: +2 ELO (Red), -2 ELO (Black) ← capped due to large gap
+Draw: -12 ELO (Red), +12 ELO (Black) ← Significant achievement for Black
+Black wins: -23 ELO (Red), +23 ELO (Black) ← Full penalty for Red
+8. Additional Features to Consider
+Rating Decay: Inactive players (no games in 6 months) gradually lose 5 ELO per month until they play again
+Leaderboards: Separate rankings for Active Players (≥10 games in last 3 months)
+Rating Categories:
+< 1000: Beginner
+1000-1399: Intermediate
+1400-1799: Advanced
+1800-2199: Expert
+2200+: Master
+Would you like me to implement this ELO system? I can:
+
+Add ELO fields to user profiles
+Update the game recording system to calculate and save ELO changes
+Display ELO ratings in the lobby and game records
+Create a leaderboard page
+Show ELO changes after each game

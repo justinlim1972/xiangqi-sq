@@ -1,0 +1,124 @@
+===== FIRESTORE RULES UPDATE FOR GAME HISTORY =====
+
+IMPORTANT: Add these rules to your Firestore Security Rules in the Firebase Console.
+
+Go to: Firebase Console → Firestore Database → Rules
+
+Add these rules INSIDE the existing `match /artifacts/{appId}` block:
+
+```javascript
+// === GAME HISTORY RULES ===
+// Users can read and write their own game history
+match /users/{userId}/game-history/{gameId} {
+  // Users can read their own game history
+  allow read: if request.auth != null && request.auth.uid == userId;
+
+  // Game system can write to user's history (when game ends)
+  // This allows the saveGameToHistory() function to save games
+  allow write: if request.auth != null;
+
+  // Admins can read all game history
+  allow read: if request.auth != null && isAdmin(appId);
+}
+```
+
+===== COMPLETE FIRESTORE RULES (RECOMMENDED) =====
+
+Replace your entire Firestore rules with this updated version:
+
+```javascript
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper function to check if user is admin
+    function isAdmin(appId) {
+      return exists(/databases/$(database)/documents/artifacts/$(appId)/users/$(request.auth.uid)/profile/data) &&
+             get(/databases/$(database)/documents/artifacts/$(appId)/users/$(request.auth.uid)/profile/data).data.role == 'admin';
+    }
+
+    match /artifacts/{appId} {
+
+      // === PUBLIC DATA (Read by all authenticated users) ===
+      match /public/data/{document=**} {
+        allow read: if request.auth != null;
+        allow write: if request.auth != null && isAdmin(appId);
+      }
+
+      // === REGIONS AND TABLES ===
+      match /public/data/regions/{regionId}/tables/{tableId} {
+        allow read: if request.auth != null;
+        allow write: if request.auth != null;
+      }
+
+      // === GAME DATA ===
+      match /public/data/games/{gameId} {
+        allow read: if request.auth != null;
+        allow write: if request.auth != null;
+      }
+
+      // === USER PROFILES ===
+      match /users/{userId}/profile/data {
+        allow read: if request.auth != null;
+        allow write: if request.auth != null && (request.auth.uid == userId || isAdmin(appId));
+      }
+
+      // === GAME HISTORY (NEW) ===
+      match /users/{userId}/game-history/{gameId} {
+        // Users can read their own game history
+        allow read: if request.auth != null && request.auth.uid == userId;
+
+        // Any authenticated user can write (for game recording system)
+        allow write: if request.auth != null;
+
+        // Admins can read all game history
+        allow read: if request.auth != null && isAdmin(appId);
+
+        // Allow deletion for the user or admin
+        allow delete: if request.auth != null && (request.auth.uid == userId || isAdmin(appId));
+      }
+
+      // === BUG REPORTS ===
+      match /bug-reports/{reportId} {
+        allow create: if request.auth != null;
+        allow read: if request.auth != null && isAdmin(appId);
+        allow delete: if request.auth != null && isAdmin(appId);
+      }
+
+      // === ADMIN ONLY ===
+      match /admin/{document=**} {
+        allow read, write: if request.auth != null && isAdmin(appId);
+      }
+    }
+  }
+}
+```
+
+===== HOW TO UPDATE =====
+
+1. Go to Firebase Console: https://console.firebase.google.com/project/xiangqi-sq/firestore/rules
+
+2. Replace the entire rules with the version above
+
+3. Click "Publish" button
+
+4. Test by:
+   - Playing a complete game (checkmate/resign/draw)
+   - Going to Lobby → Click 📜 Game Records
+   - You should see your game in the list
+
+===== WHAT THIS ALLOWS =====
+
+✅ Users can read their own game history (up to 500 games)
+✅ Game system can save games to both players' history
+✅ Admins can view all games from all users
+✅ Users can delete their own game history
+✅ Admins can delete any game history
+
+===== SECURITY NOTES =====
+
+- Users can ONLY read their own games
+- Users CANNOT read other players' games (unless they're an admin)
+- The write permission is needed for the auto-save feature
+- Games are automatically purged when exceeding 500 per player
+
