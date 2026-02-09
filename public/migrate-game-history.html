@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Migrate Game History to Centralized Collection</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            margin: 0;
+            padding: 20px;
+        }
+        h1 { color: #f1c40f; text-align: center; }
+        .container { max-width: 900px; margin: 0 auto; }
+        .status-box {
+            background: #16213e;
+            border: 1px solid #0f3460;
+            border-radius: 12px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .log {
+            background: #0a0a1a;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 15px;
+            max-height: 500px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 13px;
+            white-space: pre-wrap;
+            line-height: 1.6;
+        }
+        .log .success { color: #10b981; }
+        .log .warn { color: #f59e0b; }
+        .log .error { color: #ef4444; }
+        .log .info { color: #3b82f6; }
+        .log .highlight { color: #f1c40f; font-weight: bold; }
+        button {
+            background: #e74c3c;
+            color: white;
+            border: none;
+            padding: 15px 40px;
+            font-size: 1.1rem;
+            font-weight: 900;
+            border-radius: 10px;
+            cursor: pointer;
+            margin: 10px;
+        }
+        button:hover { background: #c0392b; }
+        button:disabled { background: #555; cursor: not-allowed; }
+        button.green { background: #27ae60; }
+        button.green:hover { background: #219a52; }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+        .stat-card {
+            background: #16213e;
+            border-radius: 10px;
+            padding: 15px;
+            text-align: center;
+        }
+        .stat-card .number { font-size: 2rem; font-weight: 900; color: #f1c40f; }
+        .stat-card .label { font-size: 0.85rem; color: #999; margin-top: 5px; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>Migrate Game History</h1>
+    <p style="text-align:center; color:#999;">Transfer all existing game records to centralized <code>all-game-history</code> collection</p>
+
+    <div class="stats" id="stats">
+        <div class="stat-card"><div class="number" id="stat-players">-</div><div class="label">Players Scanned</div></div>
+        <div class="stat-card"><div class="number" id="stat-per-player">-</div><div class="label">Per-Player Records</div></div>
+        <div class="stat-card"><div class="number" id="stat-live-games">-</div><div class="label">Live Games (completed)</div></div>
+        <div class="stat-card"><div class="number" id="stat-unique">-</div><div class="label">Unique Records</div></div>
+        <div class="stat-card"><div class="number" id="stat-duplicates">-</div><div class="label">Duplicates Skipped</div></div>
+        <div class="stat-card"><div class="number" id="stat-migrated">-</div><div class="label">Migrated to Central</div></div>
+    </div>
+
+    <div style="text-align: center;">
+        <button onclick="app.scanAll()" id="btn-scan">1. SCAN ALL SOURCES</button>
+        <button onclick="app.migrate()" id="btn-migrate" class="green" disabled>2. MIGRATE TO CENTRAL</button>
+    </div>
+
+    <div class="status-box">
+        <div class="log" id="log">Ready. Click "SCAN ALL SOURCES" to begin...</div>
+    </div>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+import { getFirestore, collection, doc, getDoc, getDocs, setDoc, query, orderBy, where } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+class MigrationApp {
+    constructor() {
+        const config = {
+            apiKey: "AIzaSyDq_LECOrc4SY90SyDsBQGmwl-YnUNFIj8",
+            authDomain: "xiangqi-sq.firebaseapp.com",
+            databaseURL: "https://xiangqi-sq-default-rtdb.asia-southeast1.firebasedatabase.app",
+            projectId: "xiangqi-sq",
+            storageBucket: "xiangqi-sq.firebasestorage.app",
+            messagingSenderId: "351923336298",
+            appId: "1:351923336298:web:e7278ea095ba085ac4935b"
+        };
+
+        this.fb = initializeApp(config);
+        this.auth = getAuth(this.fb);
+        this.db = getFirestore(this.fb);
+        this.appId = 'sg-xiangqi';
+
+        // All unique records to migrate (keyed by dedup key)
+        this.uniqueRecords = new Map();
+        this.duplicateCount = 0;
+        this.perPlayerCount = 0;
+        this.liveGamesCount = 0;
+        this.playersScanned = 0;
+
+        onAuthStateChanged(this.auth, (user) => {
+            if (user) {
+                this.user = user;
+                this.log('Logged in as: ' + user.email, 'success');
+            } else {
+                this.log('Not logged in! Redirecting...', 'error');
+                window.location.href = 'game/lobby.html';
+            }
+        });
+    }
+
+    log(msg, type = '') {
+        const el = document.getElementById('log');
+        const cls = type ? ` class="${type}"` : '';
+        el.innerHTML += `<span${cls}>${msg}</span>\n`;
+        el.scrollTop = el.scrollHeight;
+    }
+
+    updateStats() {
+        document.getElementById('stat-players').textContent = this.playersScanned;
+        document.getElementById('stat-per-player').textContent = this.perPlayerCount;
+        document.getElementById('stat-live-games').textContent = this.liveGamesCount;
+        document.getElementById('stat-unique').textContent = this.uniqueRecords.size;
+        document.getElementById('stat-duplicates').textContent = this.duplicateCount;
+    }
+
+    // Generate dedup key: tableId + totalMoves + winner
+    dedupKey(record) {
+        const tableId = record.tableId || record.gameId?.split('_')[0] || 'unknown';
+        const moves = record.totalMoves || 0;
+        const winner = record.winner || 'unknown';
+        return `${tableId}_${moves}_${winner}`;
+    }
+
+    addRecord(record, source) {
+        const key = this.dedupKey(record);
+        if (this.uniqueRecords.has(key)) {
+            this.duplicateCount++;
+            return false;
+        }
+
+        // Ensure record has a unique gameId
+        if (!record.gameId) {
+            const tableId = record.tableId || 'unknown';
+            const ts = record.completedAt || Date.now();
+            record.gameId = `${tableId}_${ts}`;
+        }
+
+        record._source = source;
+        this.uniqueRecords.set(key, record);
+        return true;
+    }
+
+    async scanAll() {
+        document.getElementById('btn-scan').disabled = true;
+        document.getElementById('log').innerHTML = '';
+        this.uniqueRecords.clear();
+        this.duplicateCount = 0;
+        this.perPlayerCount = 0;
+        this.liveGamesCount = 0;
+        this.playersScanned = 0;
+
+        this.log('========== SCANNING ALL SOURCES ==========', 'highlight');
+
+        // === SOURCE 1: Per-player game-history collections ===
+        this.log('\n--- Source 1: Per-Player game-history collections ---', 'info');
+
+        try {
+            const usernamesRef = collection(this.db, 'artifacts', this.appId, 'public', 'data', 'usernames');
+            const usernamesSnap = await getDocs(usernamesRef);
+            this.log(`Found ${usernamesSnap.size} registered users`, 'info');
+
+            for (const usernameDoc of usernamesSnap.docs) {
+                const userData = usernameDoc.data();
+                const uid = userData.uid;
+                if (!uid) continue;
+
+                try {
+                    const historyRef = collection(this.db, 'artifacts', this.appId, 'users', uid, 'game-history');
+                    const historySnap = await getDocs(historyRef);
+
+                    let added = 0;
+                    historySnap.forEach(d => {
+                        const gameData = d.data();
+                        this.perPlayerCount++;
+                        if (this.addRecord(gameData, `player:${usernameDoc.id}`)) {
+                            added++;
+                        }
+                    });
+
+                    if (historySnap.size > 0) {
+                        this.log(`  ${usernameDoc.id} (${uid.substring(0, 8)}...): ${historySnap.size} records, ${added} unique`, historySnap.size > 0 ? 'success' : '');
+                    }
+
+                    this.playersScanned++;
+                    this.updateStats();
+                } catch (err) {
+                    this.log(`  Error reading ${uid}: ${err.message}`, 'warn');
+                }
+            }
+        } catch (err) {
+            this.log(`Error scanning players: ${err.message}`, 'error');
+        }
+
+        // === SOURCE 2: Live games collection (completed games) ===
+        this.log('\n--- Source 2: Live games collection (completed games) ---', 'info');
+
+        try {
+            const gamesRef = collection(this.db, 'artifacts', this.appId, 'public', 'data', 'games');
+            const gamesSnap = await getDocs(gamesRef);
+            this.log(`Found ${gamesSnap.size} live game documents`, 'info');
+
+            for (const gameDoc of gamesSnap.docs) {
+                const g = gameDoc.data();
+                const tableId = gameDoc.id;
+
+                // Only process completed games with history
+                const isCompleted = g.status === 'finished' || g.status === 'checkmate' || g.status === 'stalemate' ||
+                                    g.status === 'draw' || g.status === 'perpetual-check' || g.status === 'perpetual-chase';
+
+                if (!isCompleted) {
+                    this.log(`  ${tableId}: status="${g.status}" - skipping (not completed)`, 'warn');
+                    continue;
+                }
+
+                const history = g.history || [];
+                if (history.length === 0) {
+                    this.log(`  ${tableId}: completed but no move history - skipping`, 'warn');
+                    continue;
+                }
+
+                // Convert live game to game record format
+                const completedAt = g.finishedAt || g.lastMoveTime || Date.now();
+                const uniqueGameId = `${tableId}_${completedAt}`;
+
+                // Convert moves to ICCS notation
+                const movesICCS = [];
+                const movesChinese = [];
+                for (const move of history) {
+                    try {
+                        if (move?.from && move?.to) {
+                            const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i'];
+                            movesICCS.push(`${files[move.from.x]}${9 - move.from.y}${files[move.to.x]}${9 - move.to.y}`);
+
+                            // Simplified Chinese notation
+                            const pieceMap = {'R':'R','r':'R','H':'H','h':'H','E':'E','e':'E','A':'A','a':'A','K':'K','k':'K','C':'C','c':'C','P':'P','p':'P'};
+                            const pl = pieceMap[move.piece] || move.piece || '?';
+                            const dir = move.from.x === move.to.x ? (move.from.y < move.to.y ? '+' : '-') : '=';
+                            const dist = Math.abs(move.from.x - move.to.x) + Math.abs(move.from.y - move.to.y);
+                            movesChinese.push(`${pl}${move.from.x}${dir}${dist}`);
+                        } else {
+                            movesICCS.push('?');
+                            movesChinese.push('?');
+                        }
+                    } catch (e) {
+                        movesICCS.push('?');
+                        movesChinese.push('?');
+                    }
+                }
+
+                // We don't have player info from live games collection — need to get from table
+                // Try to find matching per-player record first
+                let playerRed = { uid: 'unknown', playerName: 'Red Player', email: '' };
+                let playerBlack = { uid: 'unknown', playerName: 'Black Player', email: '' };
+
+                // Check if we already have this game from per-player scan (with player data)
+                const existingKey = this.dedupKey({
+                    tableId: tableId,
+                    totalMoves: history.length,
+                    winner: g.winner || 'unknown'
+                });
+
+                if (this.uniqueRecords.has(existingKey)) {
+                    this.log(`  ${tableId}: ${history.length} moves - already have from per-player scan`, 'info');
+                    this.liveGamesCount++;
+                    continue;
+                }
+
+                // Try to get player info from the table document
+                try {
+                    const tableRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'regions');
+                    // We don't know the region, so we'll use what we can from the game data
+                } catch (e) {}
+
+                const gameRecord = {
+                    gameId: uniqueGameId,
+                    tableId: tableId,
+                    regionId: g.regionId || 'unknown',
+                    playerRed: playerRed,
+                    playerBlack: playerBlack,
+                    winner: g.winner || 'unknown',
+                    reason: g.reason || g.status || 'unknown',
+                    completedAt: completedAt,
+                    movesICCS: movesICCS,
+                    movesChinese: movesChinese,
+                    fenStart: "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1",
+                    fenEnd: 'unknown',
+                    totalMoves: history.length,
+                    duration: g.startedAt ? (completedAt - g.startedAt) : 0,
+                    source: 'migrated-from-live'
+                };
+
+                if (this.addRecord(gameRecord, `live:${tableId}`)) {
+                    this.log(`  ${tableId}: ${history.length} moves, winner=${g.winner} - NEW from live games`, 'success');
+                }
+                this.liveGamesCount++;
+            }
+        } catch (err) {
+            this.log(`Error scanning live games: ${err.message}`, 'error');
+        }
+
+        // === SOURCE 3: Check existing all-game-history (already migrated) ===
+        this.log('\n--- Source 3: Existing all-game-history (already migrated) ---', 'info');
+        let existingCentralCount = 0;
+        try {
+            const centralRef = collection(this.db, 'artifacts', this.appId, 'public', 'data', 'all-game-history');
+            const centralSnap = await getDocs(centralRef);
+            existingCentralCount = centralSnap.size;
+
+            centralSnap.forEach(d => {
+                const key = this.dedupKey(d.data());
+                if (this.uniqueRecords.has(key)) {
+                    // Already in our set - mark as already migrated
+                    this.uniqueRecords.get(key)._alreadyInCentral = true;
+                }
+            });
+
+            this.log(`Found ${existingCentralCount} records already in centralized collection`, 'info');
+        } catch (err) {
+            this.log(`Error checking centralized collection: ${err.message}`, 'warn');
+        }
+
+        // === SUMMARY ===
+        this.updateStats();
+
+        const needsMigration = [...this.uniqueRecords.values()].filter(r => !r._alreadyInCentral).length;
+
+        this.log('\n========== SCAN COMPLETE ==========', 'highlight');
+        this.log(`Per-player records scanned: ${this.perPlayerCount}`, 'info');
+        this.log(`Live completed games found: ${this.liveGamesCount}`, 'info');
+        this.log(`Duplicates skipped: ${this.duplicateCount}`, 'warn');
+        this.log(`Unique records total: ${this.uniqueRecords.size}`, 'success');
+        this.log(`Already in centralized: ${existingCentralCount}`, 'info');
+        this.log(`NEED TO MIGRATE: ${needsMigration}`, 'highlight');
+
+        if (needsMigration > 0) {
+            document.getElementById('btn-migrate').disabled = false;
+        } else {
+            this.log('\nAll records already migrated! Nothing to do.', 'success');
+        }
+
+        document.getElementById('btn-scan').disabled = false;
+    }
+
+    async migrate() {
+        document.getElementById('btn-migrate').disabled = true;
+        document.getElementById('btn-scan').disabled = true;
+
+        const toMigrate = [...this.uniqueRecords.values()].filter(r => !r._alreadyInCentral);
+
+        this.log(`\n========== MIGRATING ${toMigrate.length} RECORDS ==========`, 'highlight');
+
+        let migrated = 0;
+        let errors = 0;
+
+        for (const record of toMigrate) {
+            try {
+                // Clean up internal fields before saving
+                const cleanRecord = { ...record };
+                delete cleanRecord._source;
+                delete cleanRecord._alreadyInCentral;
+
+                const centralRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'all-game-history', cleanRecord.gameId);
+                await setDoc(centralRef, cleanRecord);
+
+                migrated++;
+                this.log(`  [${migrated}/${toMigrate.length}] ${cleanRecord.gameId} - ${cleanRecord.playerRed?.playerName || '?'} vs ${cleanRecord.playerBlack?.playerName || '?'} (${cleanRecord.totalMoves} moves, ${cleanRecord.winner})`, 'success');
+
+                document.getElementById('stat-migrated').textContent = migrated;
+
+            } catch (err) {
+                errors++;
+                this.log(`  ERROR migrating ${record.gameId}: ${err.message}`, 'error');
+            }
+        }
+
+        this.log(`\n========== MIGRATION COMPLETE ==========`, 'highlight');
+        this.log(`Successfully migrated: ${migrated}`, 'success');
+        if (errors > 0) this.log(`Errors: ${errors}`, 'error');
+        this.log(`\nTotal records in all-game-history: ${migrated + ([...this.uniqueRecords.values()].filter(r => r._alreadyInCentral).length)}`, 'highlight');
+
+        document.getElementById('stat-migrated').textContent = migrated;
+        document.getElementById('btn-scan').disabled = false;
+    }
+}
+
+window.app = new MigrationApp();
+</script>
+</body>
+</html>

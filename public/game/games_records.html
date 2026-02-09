@@ -208,6 +208,57 @@
             gap: 5px;
         }
 
+        /* Pagination */
+        .pagination {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 6px;
+            padding: 20px;
+            flex-wrap: wrap;
+        }
+
+        .page-btn {
+            min-width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 2px solid #e2e8f0;
+            background: white;
+            color: #334155;
+            border-radius: 10px;
+            cursor: pointer;
+            font-weight: 700;
+            font-size: 0.9rem;
+            transition: 0.2s;
+            padding: 0 10px;
+        }
+
+        .page-btn:hover:not(.active):not(:disabled) {
+            background: #f1f5f9;
+            border-color: #cbd5e1;
+            transform: translateY(-1px);
+        }
+
+        .page-btn.active {
+            background: var(--primary);
+            color: white;
+            border-color: var(--primary);
+        }
+
+        .page-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        .page-info {
+            font-size: 0.85rem;
+            color: #64748b;
+            font-weight: 600;
+            padding: 0 10px;
+        }
+
         /* Loading State */
         .loading {
             text-align: center;
@@ -271,13 +322,23 @@
                 flex-direction: column;
                 gap: 8px;
             }
+
+            .pagination {
+                gap: 4px;
+            }
+
+            .page-btn {
+                min-width: 36px;
+                height: 36px;
+                font-size: 0.8rem;
+            }
         }
     </style>
 </head>
 <body>
 
 <header>
-    <h1>📜 My Game Records</h1>
+    <h1>My Game Records</h1>
     <a href="../lobby/lobby.html" class="btn-back">Back to Lobby</a>
 </header>
 
@@ -289,12 +350,12 @@
             <div class="stat-value" id="stat-total">0</div>
         </div>
         <div class="stat-card">
-            <div class="stat-label">Wins</div>
-            <div class="stat-value" id="stat-wins" style="color: #10b981;">0</div>
+            <div class="stat-label">Red Wins</div>
+            <div class="stat-value" id="stat-wins" style="color: #cd3333;">0</div>
         </div>
         <div class="stat-card">
-            <div class="stat-label">Losses</div>
-            <div class="stat-value" id="stat-losses" style="color: #ef4444;">0</div>
+            <div class="stat-label">Black Wins</div>
+            <div class="stat-value" id="stat-losses" style="color: #000;">0</div>
         </div>
         <div class="stat-card">
             <div class="stat-label">Draws</div>
@@ -305,8 +366,8 @@
     <!-- Filter Buttons -->
     <div class="filter-bar">
         <button class="filter-btn active" onclick="app.filterGames('all')">All Games</button>
-        <button class="filter-btn" onclick="app.filterGames('wins')">Wins Only</button>
-        <button class="filter-btn" onclick="app.filterGames('losses')">Losses Only</button>
+        <button class="filter-btn" onclick="app.filterGames('red-wins')">Red Wins</button>
+        <button class="filter-btn" onclick="app.filterGames('black-wins')">Black Wins</button>
         <button class="filter-btn" onclick="app.filterGames('draws')">Draws Only</button>
     </div>
 
@@ -314,15 +375,18 @@
     <div class="games-list" id="games-list">
         <div class="loading">
             <div class="loading-spinner"></div>
-            <p>Loading your game records...</p>
+            <p>Loading all game records...</p>
         </div>
     </div>
+
+    <!-- Pagination -->
+    <div class="pagination" id="pagination"></div>
 </div>
 
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-import { getFirestore, collection, query, orderBy, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+import { getFirestore, collection, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
 class GamesRecordsApp {
     constructor() {
@@ -344,6 +408,8 @@ class GamesRecordsApp {
         this.user = null;
         this.allGames = [];
         this.currentFilter = 'all';
+        this.currentPage = 1;
+        this.gamesPerPage = 10;
 
         this.init();
     }
@@ -363,19 +429,25 @@ class GamesRecordsApp {
 
     async loadGames() {
         try {
-            console.log('Loading games for user:', this.user.uid);
+            console.log('Loading my games from centralized collection...');
 
-            // Query user's game history
-            const historyRef = collection(this.db, 'artifacts', this.appId, 'users', this.user.uid, 'game-history');
-            const historyQuery = query(historyRef, orderBy('completedAt', 'desc'));
-            const snapshot = await getDocs(historyQuery);
+            const centralRef = collection(this.db, 'artifacts', this.appId, 'public', 'data', 'all-game-history');
+            const centralSnap = await getDocs(centralRef);
 
+            const myUid = this.user.uid;
             this.allGames = [];
-            snapshot.forEach(doc => {
-                this.allGames.push(doc.data());
+            centralSnap.forEach(doc => {
+                const game = doc.data();
+                // Only include games where the logged-in player participated
+                if (game.playerRed?.uid === myUid || game.playerBlack?.uid === myUid) {
+                    this.allGames.push(game);
+                }
             });
 
-            console.log(`Loaded ${this.allGames.length} games`);
+            // Sort in memory (newest first)
+            this.allGames.sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0));
+
+            console.log(`Loaded ${this.allGames.length} of my games from centralized collection`);
 
             this.updateStats();
             this.renderGames();
@@ -384,7 +456,7 @@ class GamesRecordsApp {
             console.error('Error loading games:', error);
             document.getElementById('games-list').innerHTML = `
                 <div class="empty-state">
-                    <div class="empty-state-icon">❌</div>
+                    <div class="empty-state-icon">Error</div>
                     <div class="empty-state-title">Error Loading Games</div>
                     <div class="empty-state-text">${error.message}</div>
                 </div>
@@ -393,32 +465,29 @@ class GamesRecordsApp {
     }
 
     updateStats() {
-        let wins = 0;
-        let losses = 0;
+        let redWins = 0;
+        let blackWins = 0;
         let draws = 0;
 
         this.allGames.forEach(game => {
-            const iAmRed = game.playerRed.uid === this.user.uid;
-            const iAmBlack = game.playerBlack.uid === this.user.uid;
-            const myColor = iAmRed ? 'red' : 'black';
-
             if (game.winner === 'draw') {
                 draws++;
-            } else if (game.winner === myColor) {
-                wins++;
-            } else {
-                losses++;
+            } else if (game.winner === 'red') {
+                redWins++;
+            } else if (game.winner === 'black') {
+                blackWins++;
             }
         });
 
         document.getElementById('stat-total').textContent = this.allGames.length;
-        document.getElementById('stat-wins').textContent = wins;
-        document.getElementById('stat-losses').textContent = losses;
+        document.getElementById('stat-wins').textContent = redWins;
+        document.getElementById('stat-losses').textContent = blackWins;
         document.getElementById('stat-draws').textContent = draws;
     }
 
     filterGames(filter) {
         this.currentFilter = filter;
+        this.currentPage = 1; // Reset to first page on filter change
 
         // Update active button
         document.querySelectorAll('.filter-btn').forEach(btn => {
@@ -429,62 +498,121 @@ class GamesRecordsApp {
         this.renderGames();
     }
 
-    renderGames() {
-        const container = document.getElementById('games-list');
+    getFilteredGames() {
+        if (this.currentFilter === 'all') return this.allGames;
 
-        // Filter games
-        let gamesToShow = this.allGames;
+        return this.allGames.filter(game => {
+            if (this.currentFilter === 'red-wins') return game.winner === 'red';
+            if (this.currentFilter === 'black-wins') return game.winner === 'black';
+            if (this.currentFilter === 'draws') return game.winner === 'draw';
+            return true;
+        });
+    }
 
-        if (this.currentFilter !== 'all') {
-            gamesToShow = this.allGames.filter(game => {
-                const iAmRed = game.playerRed.uid === this.user.uid;
-                const myColor = iAmRed ? 'red' : 'black';
+    goToPage(page) {
+        const filtered = this.getFilteredGames();
+        const totalPages = Math.ceil(filtered.length / this.gamesPerPage);
+        this.currentPage = Math.max(1, Math.min(page, totalPages));
+        this.renderGames();
 
-                if (this.currentFilter === 'wins') {
-                    return game.winner === myColor;
-                } else if (this.currentFilter === 'losses') {
-                    return game.winner !== 'draw' && game.winner !== myColor;
-                } else if (this.currentFilter === 'draws') {
-                    return game.winner === 'draw';
-                }
-                return true;
-            });
+        // Scroll to top of games list
+        document.getElementById('games-list').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    renderPagination(totalGames) {
+        const container = document.getElementById('pagination');
+        const totalPages = Math.ceil(totalGames / this.gamesPerPage);
+
+        if (totalPages <= 1) {
+            container.innerHTML = '';
+            return;
         }
 
-        if (gamesToShow.length === 0) {
+        const startGame = (this.currentPage - 1) * this.gamesPerPage + 1;
+        const endGame = Math.min(this.currentPage * this.gamesPerPage, totalGames);
+
+        let html = '';
+
+        // Previous button
+        html += `<button class="page-btn" onclick="app.goToPage(${this.currentPage - 1})" ${this.currentPage === 1 ? 'disabled' : ''}>Prev</button>`;
+
+        // Page numbers - show smart range
+        const maxVisible = 5;
+        let startPage = Math.max(1, this.currentPage - Math.floor(maxVisible / 2));
+        let endPage = Math.min(totalPages, startPage + maxVisible - 1);
+
+        // Adjust start if we're near the end
+        if (endPage - startPage < maxVisible - 1) {
+            startPage = Math.max(1, endPage - maxVisible + 1);
+        }
+
+        // First page + ellipsis
+        if (startPage > 1) {
+            html += `<button class="page-btn" onclick="app.goToPage(1)">1</button>`;
+            if (startPage > 2) {
+                html += `<span class="page-info">...</span>`;
+            }
+        }
+
+        // Page number buttons
+        for (let i = startPage; i <= endPage; i++) {
+            html += `<button class="page-btn ${i === this.currentPage ? 'active' : ''}" onclick="app.goToPage(${i})">${i}</button>`;
+        }
+
+        // Last page + ellipsis
+        if (endPage < totalPages) {
+            if (endPage < totalPages - 1) {
+                html += `<span class="page-info">...</span>`;
+            }
+            html += `<button class="page-btn" onclick="app.goToPage(${totalPages})">${totalPages}</button>`;
+        }
+
+        // Next button
+        html += `<button class="page-btn" onclick="app.goToPage(${this.currentPage + 1})" ${this.currentPage === totalPages ? 'disabled' : ''}>Next</button>`;
+
+        // Page info
+        html += `<span class="page-info">${startGame}-${endGame} of ${totalGames}</span>`;
+
+        container.innerHTML = html;
+    }
+
+    renderGames() {
+        const container = document.getElementById('games-list');
+        const filteredGames = this.getFilteredGames();
+
+        if (filteredGames.length === 0) {
             container.innerHTML = `
                 <div class="empty-state">
                     <div class="empty-state-icon">🎮</div>
                     <div class="empty-state-title">No Games Found</div>
                     <div class="empty-state-text">
                         ${this.currentFilter === 'all'
-                            ? 'Play some games to see your history here!'
+                            ? 'No games have been played yet!'
                             : `No ${this.currentFilter} recorded yet.`}
                     </div>
                 </div>
             `;
+            document.getElementById('pagination').innerHTML = '';
             return;
         }
 
+        // Paginate
+        const startIndex = (this.currentPage - 1) * this.gamesPerPage;
+        const endIndex = startIndex + this.gamesPerPage;
+        const pageGames = filteredGames.slice(startIndex, endIndex);
+
         let html = '';
 
-        gamesToShow.forEach(game => {
-            const iAmRed = game.playerRed.uid === this.user.uid;
-            const iAmBlack = game.playerBlack.uid === this.user.uid;
-            const myColor = iAmRed ? 'red' : 'black';
-            const opponent = iAmRed ? game.playerBlack : game.playerRed;
-
+        pageGames.forEach((game, idx) => {
             let resultClass = 'result-draw';
             let resultText = 'DRAW';
 
-            if (game.winner !== 'draw') {
-                if (game.winner === myColor) {
-                    resultClass = 'result-win';
-                    resultText = 'WIN';
-                } else {
-                    resultClass = 'result-loss';
-                    resultText = 'LOSS';
-                }
+            if (game.winner === 'red') {
+                resultClass = 'result-win';
+                resultText = 'RED WINS';
+            } else if (game.winner === 'black') {
+                resultClass = 'result-loss';
+                resultText = 'BLACK WINS';
             }
 
             const gameDate = new Date(game.completedAt).toLocaleDateString('en-SG', {
@@ -496,16 +624,24 @@ class GamesRecordsApp {
             });
 
             const duration = this.formatDuration(game.duration);
+            const gameNumber = startIndex + idx + 1;
 
-            // Get ELO change for this player
+            // Show ELO changes for both players
             let eloDisplay = '';
             if (game.eloChanges) {
-                const myELOChange = iAmRed ? game.eloChanges.red : game.eloChanges.black;
-                const changeColor = myELOChange.change >= 0 ? '#10b981' : '#ef4444';
-                const changeSign = myELOChange.change >= 0 ? '+' : '';
+                const redChange = game.eloChanges.red;
+                const blackChange = game.eloChanges.black;
+                const redColor = redChange.change >= 0 ? '#10b981' : '#ef4444';
+                const blackColor = blackChange.change >= 0 ? '#10b981' : '#ef4444';
+                const redSign = redChange.change >= 0 ? '+' : '';
+                const blackSign = blackChange.change >= 0 ? '+' : '';
+
                 eloDisplay = `
-                    <div class="game-detail-item" style="color:${changeColor}; font-weight:700;">
-                        📊 ${myELOChange.oldRating} → ${myELOChange.newRating} (${changeSign}${myELOChange.change})
+                    <div class="game-detail-item" style="color:${redColor}; font-weight:700;">
+                        ELO ${redChange.oldRating} > ${redChange.newRating} (${redSign}${redChange.change})
+                    </div>
+                    <div class="game-detail-item" style="color:${blackColor}; font-weight:700;">
+                        ELO ${blackChange.oldRating} > ${blackChange.newRating} (${blackSign}${blackChange.change})
                     </div>
                 `;
             }
@@ -514,18 +650,19 @@ class GamesRecordsApp {
                 <div class="game-card" onclick="app.viewGame('${game.gameId}')">
                     <div class="game-header">
                         <div class="game-players">
-                            <span class="player-red">${game.playerRed.playerName}</span>
+                            <span style="color:#94a3b8; font-size:0.8rem; font-weight:600;">#${gameNumber}</span>
+                            <span class="player-red">${game.playerRed?.playerName || 'Red'}</span>
                             <span> vs </span>
-                            <span class="player-black">${game.playerBlack.playerName}</span>
+                            <span class="player-black">${game.playerBlack?.playerName || 'Black'}</span>
                         </div>
                         <div class="game-result ${resultClass}">${resultText}</div>
                     </div>
                     <div class="game-details">
-                        <div class="game-detail-item">📅 ${gameDate}</div>
-                        <div class="game-detail-item">🎯 ${game.totalMoves} moves</div>
-                        <div class="game-detail-item">⏱️ ${duration}</div>
-                        <div class="game-detail-item">📱 ${game.source === 'mobile' ? 'Mobile' : 'PC'}</div>
-                        <div class="game-detail-item">🏁 ${this.formatReason(game.reason)}</div>
+                        <div class="game-detail-item">${gameDate}</div>
+                        <div class="game-detail-item">${game.totalMoves} moves</div>
+                        <div class="game-detail-item">${duration}</div>
+                        <div class="game-detail-item">${game.source === 'mobile' ? 'Mobile' : 'PC'}</div>
+                        <div class="game-detail-item">${this.formatReason(game.reason)}</div>
                         ${eloDisplay}
                     </div>
                 </div>
@@ -533,9 +670,13 @@ class GamesRecordsApp {
         });
 
         container.innerHTML = html;
+
+        // Render pagination
+        this.renderPagination(filteredGames.length);
     }
 
     formatDuration(ms) {
+        if (!ms || ms <= 0) return '0m';
         const minutes = Math.floor(ms / 60000);
         if (minutes < 60) {
             return `${minutes}m`;
@@ -555,7 +696,7 @@ class GamesRecordsApp {
             'perpetual-chase': 'Perpetual Chase',
             'stalemate': 'Stalemate'
         };
-        return reasons[reason] || reason;
+        return reasons[reason] || reason || 'Unknown';
     }
 
     viewGame(gameId) {

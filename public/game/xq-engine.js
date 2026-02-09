@@ -331,29 +331,83 @@ export class XQEngine {
      * @returns {object|null} - {loser: 'red'|'black'} if perpetual check detected, null otherwise
      */
     isPerpetualCheck(moveHistory) {
-        // Need at least 6 moves to detect perpetual check (3 consecutive checks)
-        if (!moveHistory || moveHistory.length < 6) return null;
+        // Need at least 14 moves to detect perpetual check (7 consecutive checks by same player)
+        if (!moveHistory || moveHistory.length < 14) return null;
 
-        // Look at the last 6 moves
-        const recent = moveHistory.slice(-6);
+        // Count consecutive checks by the same player
+        let consecutiveChecks = 0;
+        let checkingPlayer = null;
 
-        // Check if all 6 moves involved the same player giving check
-        const checksBy = recent.filter(m => m.isCheck);
-        if (checksBy.length < 3) return null;
+        // Scan backwards through recent moves
+        for (let i = moveHistory.length - 1; i >= 0 && consecutiveChecks < 7; i--) {
+            const move = moveHistory[i];
 
-        // If the last 3 moves all gave check and came from the same player
-        const lastThree = moveHistory.slice(-3);
-        const allChecks = lastThree.every(m => m.isCheck);
+            if (move.isCheck) {
+                // First check we encounter
+                if (checkingPlayer === null) {
+                    checkingPlayer = move.movedBy;
+                    consecutiveChecks = 1;
+                }
+                // Same player continues checking
+                else if (move.movedBy === checkingPlayer) {
+                    consecutiveChecks++;
+                }
+                // Different player gave check - reset counter
+                else {
+                    break; // Stop counting, not consecutive by same player
+                }
+            } else {
+                // Non-check move by the checking player - still counts as their turn
+                if (checkingPlayer !== null && move.movedBy === checkingPlayer) {
+                    // Checking player made a non-check move, reset
+                    break;
+                }
+                // Opponent's non-check move - continue scanning
+            }
+        }
 
-        if (allChecks) {
-            // The player giving check loses
-            // Last move was by the checking player
-            const loser = lastThree[lastThree.length - 1].movedBy;
-            console.log('🚫 Perpetual check detected! Checking player loses:', loser);
-            return { loser };
+        // If one player gave check 7+ consecutive times, they lose
+        if (consecutiveChecks >= 7 && checkingPlayer) {
+            console.log('🚫 Perpetual check detected! Player', checkingPlayer, 'gave', consecutiveChecks, 'consecutive checks and loses');
+            return { loser: checkingPlayer };
         }
 
         return null;
+    }
+
+    /**
+     * Get the current consecutive check count for warning purposes
+     * @param {Array} moveHistory - Array of recent board hashes with check status
+     * @returns {object} - {count: number, checker: 'red'|'black'|null}
+     */
+    getConsecutiveCheckCount(moveHistory) {
+        if (!moveHistory || moveHistory.length < 2) return { count: 0, checker: null };
+
+        let consecutiveChecks = 0;
+        let checkingPlayer = null;
+
+        // Scan backwards through recent moves
+        for (let i = moveHistory.length - 1; i >= 0; i--) {
+            const move = moveHistory[i];
+
+            if (move.isCheck) {
+                if (checkingPlayer === null) {
+                    checkingPlayer = move.movedBy;
+                    consecutiveChecks = 1;
+                } else if (move.movedBy === checkingPlayer) {
+                    consecutiveChecks++;
+                } else {
+                    break;
+                }
+            } else {
+                if (checkingPlayer !== null && move.movedBy === checkingPlayer) {
+                    break; // Checking player made a non-check move, streak broken
+                }
+                // Opponent's non-check move - continue scanning
+            }
+        }
+
+        return { count: consecutiveChecks, checker: checkingPlayer };
     }
 
     /**

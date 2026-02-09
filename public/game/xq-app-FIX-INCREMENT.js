@@ -2,7 +2,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebas
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
 import { getFirestore, doc, onSnapshot, setDoc, getDoc, updateDoc, arrayUnion, arrayRemove, deleteField, increment, serverTimestamp, runTransaction } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 import { getDatabase, ref, onValue, onDisconnect, set, remove } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-database.js";
-import { XQEngine } from "./xq-engine.js";
+import { XQEngine } from "./xq-engine.js?v=206";
 import { XQUI } from "./xq-ui.js?v=107";
 
 /**
@@ -45,6 +45,8 @@ export class XQApp {
         this.gameState = null;
         this.previousGameStatus = null; // Track previous game status to detect battle start
         this.previousTurn = null; // Track previous turn to detect turn changes
+        this.currentGameGeneration = null; // Track game startedAt to detect new games
+        this._animationTimeout = null; // Track pending animation timeout for cancellation
         this.occupants = []; // Initialize as empty array
         this.lastButtonState = null; // Track button state to prevent unnecessary recreation
         this.myPieceStyle = 'ivory'; // Default piece style
@@ -68,15 +70,17 @@ export class XQApp {
         // Add sitting lock to prevent double-clicks
         this.isSitting = false;
 
+        // Add move lock to prevent double-click piece disappearance
+        this.isMoving = false;
+
         // Track last move timestamp to avoid duplicate animations
         this.lastMoveTimestamp = null;
         this.hasCompletedFirstSync = false; // Track if we've completed the initial page load sync
         this.lastResignationTimestamp = null; // Track resignation timestamp to avoid duplicate animations
 
-        // Game timer properties (15 minutes per player)
-        this.timerInterval = null;
-        this.redTimeLeft = 15 * 60; // 15 minutes in seconds
-        this.blackTimeLeft = 15 * 60;
+        // NEW TIMESTAMP-BASED TIMER SYSTEM
+        // Only display interval, no countdown logic
+        this.timerDisplayInterval = null;
         this.timeIncrement = 0; // Will be loaded from region data
 
         // Settings (load from localStorage and remember user's preference)
@@ -346,264 +350,105 @@ export class XQApp {
     }
 
     formatTime(seconds) {
-        console.log('🕐 formatTime called with seconds:', seconds);
         const hrs = Math.floor(seconds / 3600);
         const mins = Math.floor((seconds % 3600) / 60);
-        const secs = seconds % 60;
-        const formatted = `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
-        console.log('🕐 formatTime returning:', formatted);
-        return formatted;
+        const secs = Math.floor(seconds % 60);
+        return `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
     }
 
+    // NEW TIMESTAMP-BASED DISPLAY UPDATE
     updateTimerDisplay() {
-        console.log('⏱️ updateTimerDisplay called - redTimeLeft:', this.redTimeLeft, 'blackTimeLeft:', this.blackTimeLeft);
+        if (!this.gameState || this.gameState.status !== 'playing') return;
 
+        const g = this.gameState;
+
+        // Calculate elapsed time since turn started
+        const elapsed = g.turnStartTime ? (Date.now() - g.turnStartTime) / 1000 : 0;
+
+        // Calculate display times
+        let redDisplay = g.redTimeLeft || 0;
+        let blackDisplay = g.blackTimeLeft || 0;
+
+        // Subtract elapsed time from current player
+        if (g.turn === 'red') {
+            redDisplay = Math.max(0, redDisplay - elapsed);
+        } else if (g.turn === 'black') {
+            blackDisplay = Math.max(0, blackDisplay - elapsed);
+        }
+
+        // Update display elements
         const redTimerEl = document.getElementById('red-timer');
         const blackTimerEl = document.getElementById('black-timer');
+
+        if (redTimerEl) {
+            redTimerEl.innerText = this.formatTime(redDisplay);
+            redTimerEl.style.display = 'block';
+        }
+        if (blackTimerEl) {
+            blackTimerEl.innerText = this.formatTime(blackDisplay);
+            blackTimerEl.style.display = 'block';
+        }
+
+        // Stress animation when under 60 seconds
         const redCard = document.getElementById('player-card-red');
         const blackCard = document.getElementById('player-card-black');
 
-        console.log('⏱️ Timer elements found:', {
-            redTimerEl: !!redTimerEl,
-            blackTimerEl: !!blackTimerEl,
-            redDisplay: redTimerEl?.style.display,
-            blackDisplay: blackTimerEl?.style.display
-        });
-
-        if (redTimerEl) {
-            const formattedRed = this.formatTime(this.redTimeLeft);
-            redTimerEl.innerText = formattedRed;
-            console.log('⏱️ RED timer set to:', formattedRed, 'actual innerText:', redTimerEl.innerText);
-        }
-        if (blackTimerEl) {
-            const formattedBlack = this.formatTime(this.blackTimeLeft);
-            blackTimerEl.innerText = formattedBlack;
-            console.log('⏱️ BLACK timer set to:', formattedBlack, 'actual innerText:', blackTimerEl.innerText);
-        }
-
-        // Add stress animation when time is running low (under 1 minute = 60 seconds)
         if (redCard) {
-            if (this.redTimeLeft <= 60 && this.redTimeLeft > 0) {
+            if (redDisplay <= 60 && redDisplay > 0) {
                 redCard.classList.add('time-stress');
             } else {
                 redCard.classList.remove('time-stress');
             }
         }
         if (blackCard) {
-            if (this.blackTimeLeft <= 60 && this.blackTimeLeft > 0) {
+            if (blackDisplay <= 60 && blackDisplay > 0) {
                 blackCard.classList.add('time-stress');
             } else {
                 blackCard.classList.remove('time-stress');
             }
         }
+
+        // Check for timeout — but NEVER on a fresh game with no moves
+        const hasMoves = g.history && g.history.length > 0;
+        if (!hasMoves) return;
+
+        if (redDisplay <= 0 && g.turn === 'red') {
+            this.handleTimeout('red');
+        } else if (blackDisplay <= 0 && g.turn === 'black') {
+            this.handleTimeout('black');
+        }
     }
 
-    async startTimer() {
-        // Stop any existing timer
-        if (this.timerInterval) {
-            console.warn('⚠️ Timer already running! Clearing old interval...');
-            clearInterval(this.timerInterval);
-            this.timerInterval = null;
+    // NEW TIMESTAMP-BASED TIMER - ONLY DISPLAY UPDATES
+    startTimerDisplay() {
+        // Prevent multiple intervals
+        if (this.timerDisplayInterval) {
+            console.log('⏱️ Timer display already running');
+            return;
         }
 
-        // Reset initialization flag for new game
-        this.timersInitialized = true; // Mark as initialized since startTimer sets it up
+        console.log('⏱️ Starting timestamp-based timer display (300ms updates)');
 
-        console.log('⏱️ Starting timer...');
-
-        // Show timer displays
+        // Show timer elements
         const redTimerEl = document.getElementById('red-timer');
         const blackTimerEl = document.getElementById('black-timer');
         if (redTimerEl) redTimerEl.style.display = 'block';
         if (blackTimerEl) blackTimerEl.style.display = 'block';
 
-        // Get time control from region
-        let baseTime = 15; // Default 15 minutes
-        let increment = 0; // Default 0 seconds increment
-
-        try {
-            const regionRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'regions', this.rid);
-            const regionSnap = await getDoc(regionRef);
-            if (regionSnap.exists()) {
-                const regionData = regionSnap.data();
-                baseTime = regionData.baseTime || 15;
-                increment = regionData.increment || 0;
-                console.log(`⏱️ Using time control from region: ${baseTime}m + ${increment}s increment`);
-            } else {
-                console.warn('⚠️ Region not found, using default time control: 15m + 0s');
-            }
-        } catch (error) {
-            console.error('❌ Failed to fetch region time control:', error);
-        }
-
-        // Store increment for later use
-        this.timeIncrement = increment;
-
-        // Calculate actual time remaining from move history (for observers/rejoining players)
-        if (this.gameState && this.gameState.history && this.gameState.history.length > 0) {
-            console.log('⏱️ Calculating time from move history for observer/rejoining player...');
-
-            // Start with base time
-            let redTime = baseTime * 60;
-            let blackTime = baseTime * 60;
-
-            // Get last move time
-            const lastMove = this.gameState.history[this.gameState.history.length - 1];
-            const lastMoveTime = lastMove.ts || Date.now();
-
-            // Calculate time used per player
-            this.gameState.history.forEach((move, index) => {
-                if (index === 0) return; // Skip first move (no previous move to calculate from)
-
-                const prevMove = this.gameState.history[index - 1];
-                const timeSpent = Math.floor((move.ts - prevMove.ts) / 1000);
-
-                // Subtract time spent by the player who made THIS move
-                if (move.piece) {
-                    const isRed = move.piece === move.piece.toUpperCase();
-                    if (isRed) {
-                        redTime = redTime - timeSpent + increment;
-                    } else {
-                        blackTime = blackTime - timeSpent + increment;
-                    }
-                }
-            });
-
-            // Account for time elapsed since last move for current player
-            const now = Date.now();
-            const elapsedSinceLastMove = Math.floor((now - lastMoveTime) / 1000);
-
-            if (this.gameState.turn === 'red') {
-                redTime -= elapsedSinceLastMove;
-            } else {
-                blackTime -= elapsedSinceLastMove;
-            }
-
-            // Ensure times don't go negative
-            this.redTimeLeft = Math.max(0, redTime);
-            this.blackTimeLeft = Math.max(0, blackTime);
-
-            console.log(`⏱️ Calculated times: Red=${this.redTimeLeft}s, Black=${this.blackTimeLeft}s`);
-        } else {
-            // New game - use base time
-            console.log('⏱️ New game - using base time');
-            this.redTimeLeft = baseTime * 60;
-            this.blackTimeLeft = baseTime * 60;
-        }
-
-        this.updateTimerDisplay();
-
-        // Store turn start time for local calculation
-        // ALWAYS use current time to avoid huge elapsed time on first move
-        this.turnStartTime = Date.now();
-        console.log(`⏱️ Initialized turnStartTime to NOW: ${this.turnStartTime}`);
-
-        // NO Firebase timer sync - timers are purely local now
-
-        console.log(`⏱️ Starting LOCAL timer for ALL clients (no Firebase sync).`);
-
-        // Reset tick counter when starting new timer
-        this.timerTickCount = 0;
-
-        // LOCAL TIMER: Runs on ALL clients independently (no Firebase sync!)
-        this.timerInterval = setInterval(() => {
-            if (!this.gameState || this.gameState.status !== 'playing') {
-                this.stopTimer();
-                return;
-            }
-
-            // Decrement the timer for whoever's turn it is
-            if (this.gameState.turn === 'red') {
-                this.redTimeLeft--;
-                if (this.redTimeLeft <= 0) {
-                    this.redTimeLeft = 0;
-                    this.handleTimeout('red');
-                    return;
-                }
-            } else {
-                this.blackTimeLeft--;
-                if (this.blackTimeLeft <= 0) {
-                    this.blackTimeLeft = 0;
-                    this.handleTimeout('black');
-                    return;
-                }
-            }
-
+        // Update display every 300ms for smooth countdown
+        this.timerDisplayInterval = setInterval(() => {
             this.updateTimerDisplay();
+        }, 300);
 
-            // console.log(`⏱️ LOCAL timer tick: Red=${this.redTimeLeft}s, Black=${this.blackTimeLeft}s, Turn=${this.gameState.turn}`);
-        }, 1000);
+        // Initial display update
+        this.updateTimerDisplay();
     }
 
-    startTimerDisplay() {
-        // Display timer that reads from Firebase (source of truth)
-        console.log('⏱️ Starting timer DISPLAY (reads from Firebase every second)');
-
-        // Stop any existing interval
-        if (this.timerInterval) {
-            clearInterval(this.timerInterval);
+    stopTimerDisplay() {
+        if (this.timerDisplayInterval) {
+            clearInterval(this.timerDisplayInterval);
+            this.timerDisplayInterval = null;
         }
-
-        // Display update interval - reads from Firebase and calculates display time
-        this.timerInterval = setInterval(async () => {
-            if (!this.gameState || this.gameState.status !== 'playing') {
-                this.stopTimer();
-                return;
-            }
-
-            try {
-                // Read timer values from Firebase (SOURCE OF TRUTH)
-                const gameRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'games', this.tid);
-                const gameSnap = await getDoc(gameRef);
-                const gameData = gameSnap.data();
-
-                if (!gameData || !gameData.timerStarted) {
-                    // Timer not initialized yet
-                    return;
-                }
-
-                // Calculate elapsed time since last update
-                const now = Date.now();
-                const lastUpdate = gameData.lastTimerUpdate || now;
-                const elapsedSeconds = Math.floor((now - lastUpdate) / 1000);
-
-                // Calculate display time (Firebase value minus elapsed for current player)
-                let displayRedTime = gameData.redTimeLeft || 0;
-                let displayBlackTime = gameData.blackTimeLeft || 0;
-
-                if (this.gameState.turn === 'red') {
-                    displayRedTime = Math.max(0, displayRedTime - elapsedSeconds);
-                    if (displayRedTime <= 0) {
-                        this.handleTimeout('red');
-                        return;
-                    }
-                } else {
-                    displayBlackTime = Math.max(0, displayBlackTime - elapsedSeconds);
-                    if (displayBlackTime <= 0) {
-                        this.handleTimeout('black');
-                        return;
-                    }
-                }
-
-                // Update local display values
-                this.redTimeLeft = displayRedTime;
-                this.blackTimeLeft = displayBlackTime;
-
-                this.updateTimerDisplay();
-            } catch (err) {
-                console.error('❌ Error reading timer from Firebase:', err);
-            }
-        }, 1000);
-    }
-
-    stopTimer() {
-        if (this.timerInterval) {
-            clearInterval(this.timerInterval);
-            this.timerInterval = null;
-        }
-
-        // Reset tick counter
-        this.timerTickCount = 0;
 
         // Hide timer displays
         const redTimerEl = document.getElementById('red-timer');
@@ -611,7 +456,7 @@ export class XQApp {
         if (redTimerEl) redTimerEl.style.display = 'none';
         if (blackTimerEl) blackTimerEl.style.display = 'none';
 
-        // Remove stress animation when game ends
+        // Remove stress animation
         const redCard = document.getElementById('player-card-red');
         const blackCard = document.getElementById('player-card-black');
         if (redCard) redCard.classList.remove('time-stress');
@@ -619,7 +464,13 @@ export class XQApp {
     }
 
     async handleTimeout(color) {
-        this.stopTimer();
+        // Safety: Never declare timeout on a fresh game with no moves
+        if (!this.gameState?.history || this.gameState.history.length === 0) {
+            console.log('⏭️ Skipping timeout - no moves made yet in this game');
+            return;
+        }
+
+        this.stopTimerDisplay();
         const winner = color === 'red' ? 'black' : 'red';
 
         // Show timeout animation and sound
@@ -719,6 +570,9 @@ export class XQApp {
             // Check for battle rejection notification
             this.checkBattleRejectionNotification();
 
+            // Check for battle timeout notification (opponent booted for not responding)
+            this.checkBattleTimeoutNotification();
+
             // Show/hide seating controls BASED ON CURRENT TABLE STATE
             const seatingArea = document.getElementById('seating-area');
             const btnEngage = document.getElementById('btn-engage');
@@ -769,6 +623,12 @@ export class XQApp {
 
                 if (bothSeated && iAmSeated && !this.table.matchActive) {
                     if (!battleRequest) {
+                        // No request pending - clear requester countdown if running
+                        if (this.requesterCountdownTimer) {
+                            clearInterval(this.requesterCountdownTimer);
+                            this.requesterCountdownTimer = null;
+                            console.log('🔄 Requester countdown cleared - battle request resolved');
+                        }
                         // No request yet - show "Request Battle"
                         console.log('✅ Showing REQUEST BATTLE button');
                         btnEngage.style.display = 'block';
@@ -793,6 +653,11 @@ export class XQApp {
                         btnEngage.onclick = () => this.acceptBattle();
                     }
                 } else {
+                    // Match active or not both seated - clear requester countdown
+                    if (this.requesterCountdownTimer) {
+                        clearInterval(this.requesterCountdownTimer);
+                        this.requesterCountdownTimer = null;
+                    }
                     btnEngage.style.display = 'none';
                 }
             }
@@ -925,9 +790,11 @@ export class XQApp {
             console.log('👤 Rendering:', p.name, roleText, elo, coins, styleClass);
 
             return `
-                <div class="presence-item ${styleClass}">
-                    <strong>${p.name}</strong>
-                    <em>${roleText} • ELO: ${elo} • 🪙 ${coins}</em>
+                <div class="presence-item ${styleClass || 'p-observer'}">
+                    <div class="presence-info">
+                        <strong>${p.name}</strong>
+                        <em>${roleText} | ELO: ${elo} | Coins: ${coins}</em>
+                    </div>
                 </div>
             `;
         }).join('');
@@ -950,39 +817,82 @@ export class XQApp {
                 timestamp: Date.now()
             });
 
-            // Detect battle start: Initialize timer when game status changes to 'playing'
-            // IMPORTANT: Only initialize if previous status was explicitly NOT 'playing' (avoid re-initializing on page load)
+            // NEW TIMESTAMP-BASED: Initialize timer when battle starts
             const battleJustStarted = g.status === 'playing' && this.previousGameStatus !== null && this.previousGameStatus !== 'playing';
-            if (battleJustStarted) {
-                console.log('⚔️ Battle just started! Initializing timer in Firebase...');
 
-                // Initialize timer immediately (no splash screen delay)
+            // Also detect new game by startedAt changing
+            const gameGeneration = g.startedAt || 0;
+            if (this.currentGameGeneration && gameGeneration !== this.currentGameGeneration && g.status === 'playing') {
+                console.log('🔄 New game generation detected! Old:', this.currentGameGeneration, 'New:', gameGeneration);
+                this.lastMoveTimestamp = null;
+                this.hasCompletedFirstSync = false;
+                this.lastResignationTimestamp = null;
+                // Cancel any pending animation timeouts
+                if (this._animationTimeout) {
+                    clearTimeout(this._animationTimeout);
+                    this._animationTimeout = null;
+                }
+                // Hide any lingering animation
+                const animEl = document.getElementById('move-animation');
+                if (animEl) animEl.style.display = 'none';
+                // Hide game-over overlay
+                const overlayEl = document.getElementById('game-over-overlay');
+                if (overlayEl) {
+                    overlayEl.classList.remove('show');
+                    overlayEl.style.opacity = '0';
+                    overlayEl.style.visibility = 'hidden';
+                }
+                this.hidePerpetualCheckWarning();
+            }
+            this.currentGameGeneration = gameGeneration;
+
+            if (battleJustStarted) {
+                console.log('⚔️ Battle just started! Initializing timestamp-based timer...');
+
+                // Reset local state tracking to prevent old game announcements from replaying
+                this.lastMoveTimestamp = null;
+                this.hasCompletedFirstSync = false;
+                this.lastResignationTimestamp = null;
+                // Cancel any pending animation timeouts
+                if (this._animationTimeout) {
+                    clearTimeout(this._animationTimeout);
+                    this._animationTimeout = null;
+                }
+                // Hide any lingering animation or game-over overlay from previous game
+                const animEl = document.getElementById('move-animation');
+                if (animEl) animEl.style.display = 'none';
+                const overlayEl = document.getElementById('game-over-overlay');
+                if (overlayEl) {
+                    overlayEl.classList.remove('show');
+                    overlayEl.style.opacity = '0';
+                    overlayEl.style.visibility = 'hidden';
+                }
+                this.hidePerpetualCheckWarning();
+                console.log('🔄 Local announcement state reset for new game');
+
                 const iAmRed = this.table?.playerRed?.uid === this.user?.uid;
 
                 if (iAmRed) {
-                    console.log('⏱️🔴 I am RED - initializing timer in Firebase');
+                    console.log('⏱️🔴 I am RED - initializing timer with server timestamp');
 
                     // Get time control
                     const regionRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'regions', this.rid);
                     getDoc(regionRef).then(regionSnap => {
                         const baseTime = (regionSnap.data()?.baseTime || 15) * 60;
+                        const increment = regionSnap.data()?.increment || 0;
+                        this.timeIncrement = increment;
 
                         const gameRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'games', this.tid);
                         setDoc(gameRef, {
                             redTimeLeft: baseTime,
                             blackTimeLeft: baseTime,
-                            lastTimerUpdate: Date.now(),
+                            turnStartTime: Date.now(), // Use current timestamp
                             timerStarted: true
                         }, { merge: true }).then(() => {
-                            console.log(`⏱️✅ Timer initialized: ${baseTime}s each`);
+                            console.log(`⏱️✅ Timer initialized: ${baseTime}s each, increment: ${increment}s`);
                         });
                     });
-                } else {
-                    console.log('⏱️⚫ I am BLACK or Observer - waiting for RED to initialize timer');
                 }
-
-                // All clients start display update immediately
-                this.startTimerDisplay();
             }
 
             // Update previous status for next comparison (set to null on first load if no previous status)
@@ -992,79 +902,14 @@ export class XQApp {
                 this.previousGameStatus = g.status;
             }
 
-            // LOCAL TIMER SYNC: Use move timestamps to synchronize time
-            // When a move happens, calculate time used by previous player
-            const turnChanged = this.previousTurn !== null && this.previousTurn !== g.turn;
-
-            // CRITICAL: Only add increment if there was an actual move (not just game start)
-            // Check that lastMove has both 'from' and 'to' fields, indicating a real move was made
-            const actualMoveMade = g.lastMove && g.lastMove.from && g.lastMove.to && g.lastMove.ts;
-
-            if (turnChanged && actualMoveMade) {
-                console.log(`🔄 Turn changed from ${this.previousTurn} to ${g.turn} - ACTUAL MOVE DETECTED`);
-                console.log(`   Move: ${g.lastMove.from} → ${g.lastMove.to}`);
-
-                // FETCH INCREMENT FROM FIRESTORE DIRECTLY
-                const regionSnap = await getDoc(doc(this.db, 'artifacts', this.appId, 'public', 'data', 'regions', this.rid));
-                const regionData = regionSnap.data();
-                const increment = regionData?.increment || 0;
-                console.log(`⏱️ FETCHED increment from Firestore: ${increment}`);
-
-                // Add time increment to the player who just moved
-                // NOTE: Time deduction already happened via local timer countdown (lines 460-475)
-                // We only need to add the increment bonus
-                const previousPlayer = this.previousTurn;
-                console.log(`⏱️ Increment logic: increment = ${increment}, type = ${typeof increment}`);
-                if (increment && increment > 0) {
-                    if (previousPlayer === 'red') {
-                        this.redTimeLeft += increment;
-                        console.log(`✅ Added ${increment}s increment to RED: ${this.redTimeLeft}s`);
-                    } else if (previousPlayer === 'black') {
-                        this.blackTimeLeft += increment;
-                        console.log(`✅ Added ${increment}s increment to BLACK: ${this.blackTimeLeft}s`);
-                    }
-                } else {
-                    console.log(`⚠️ No increment to add (increment = ${increment})`);
-                }
-
-                // Update turn start time for next move
-                this.turnStartTime = g.lastMove.ts;
-            } else if (turnChanged) {
-                console.log(`⚠️ Turn changed but NO MOVE detected - skipping increment`);
-            }
-
-            // Update display
-            this.updateTimerDisplay();
-
-            // Ensure timer is running
-            if (!this.timerInterval) {
-                this.startTimer();
+            // Start timer display if game is playing
+            if (g.status === 'playing' && !this.timerDisplayInterval) {
+                this.startTimerDisplay();
+            } else if (g.status !== 'playing' && this.timerDisplayInterval) {
+                this.stopTimerDisplay();
             }
 
             this.previousTurn = g.turn;
-
-            // Update timer display and stress animation
-            if (g.status === 'playing') {
-                // FIX: Ensure timers are visible and initialized for observers joining mid-game
-                const redTimerEl = document.getElementById('red-timer');
-                const blackTimerEl = document.getElementById('black-timer');
-
-                // ALWAYS show timers when game is playing
-                if (redTimerEl) redTimerEl.style.display = 'block';
-                if (blackTimerEl) blackTimerEl.style.display = 'block';
-
-                console.log('🔍 Timer check:', {
-                    redTimerExists: !!redTimerEl,
-                    redTimerDisplay: redTimerEl?.style.display,
-                    redTimeLeft: this.redTimeLeft,
-                    blackTimeLeft: this.blackTimeLeft,
-                    timersInitialized: this.timersInitialized
-                });
-
-                // Just update the display - timers are managed by startTimer() and the interval
-
-                this.updateTimerDisplay();
-            }
 
             // Update button visibility when game state changes
             console.log('📞 Calling updateInGameControls from syncGame()');
@@ -1143,24 +988,65 @@ export class XQApp {
                 if (shouldShowAnimation) {
                     console.log('✅ Showing animation - recent move or already synced');
 
+                    // Cancel any previous pending animation timeout
+                    if (this._animationTimeout) {
+                        clearTimeout(this._animationTimeout);
+                    }
+
+                    // Capture the game generation at the time of this snapshot
+                    const snapshotGeneration = g.startedAt || 0;
+
                     // Show animation for all clients (including the one who made the move)
-                    setTimeout(() => {
+                    this._animationTimeout = setTimeout(() => {
+                        this._animationTimeout = null;
+
+                        // CRITICAL: If a new game has started since this timeout was set, skip animation
+                        if (this.currentGameGeneration !== snapshotGeneration) {
+                            console.log('⏭️ Skipping stale animation - new game started since timeout was set');
+                            return;
+                        }
+
+                        // CRITICAL: No moves made yet = fresh game, never announce any result
+                        const hasMovesInGame = this.gameState?.history && this.gameState.history.length > 0;
+                        if (!hasMovesInGame) {
+                            console.log('⏭️ Skipping animation - no moves made yet in this game');
+                            return;
+                        }
+
+                        // Use CURRENT game state (not snapshot's stale g) to decide animations
+                        const currentStatus = this.gameState?.status;
+                        const currentWinner = this.gameState?.winner;
+                        const currentReason = this.gameState?.reason;
+
+                        // CRITICAL: If game is now 'playing' (new game), skip any game-ending animations
+                        if (currentStatus === 'playing') {
+                            // Only show in-game animations (check, capture) - NOT game-ending ones
+                            if (g.lastMove && g.lastMove.isCheck) {
+                                console.log('👑 Showing check animation');
+                                this.showMoveAnimation('check');
+                            } else if (g.lastMove && g.lastMove.isCapture) {
+                                console.log('⚔️ Showing capture animation');
+                                this.showMoveAnimation('capture');
+                            }
+                            return;
+                        }
+
                         // Check game status for special endings
-                        if (g.status === 'draw') {
+                        if (currentStatus === 'draw') {
                             console.log('🔁 Showing 3-fold repetition draw animation');
                             this.showMoveAnimation('draw');
-                        } else if (g.status === 'finished' && g.reason === 'resignation' && g.winner) {
-                            console.log('🏳️ Showing resignation animation for winner:', g.winner);
-                            this.showMoveAnimation('resignation', {winner: g.winner});
-                        } else if (g.status === 'perpetual-check') {
-                            console.log('♾️ Showing perpetual check animation, winner:', g.winner);
-                            this.showMoveAnimation('perpetual-check', {winner: g.winner});
-                        } else if (g.status === 'perpetual-chase') {
-                            console.log('♾️ Showing perpetual chase animation, winner:', g.winner);
-                            this.showMoveAnimation('perpetual-chase', {winner: g.winner});
+                        } else if (currentStatus === 'finished' && currentReason === 'resignation' && currentWinner) {
+                            console.log('🏳️ Showing resignation animation for winner:', currentWinner);
+                            this.showMoveAnimation('resignation', {winner: currentWinner});
+                        } else if (currentStatus === 'perpetual-check') {
+                            console.log('♾️ Showing perpetual check animation, winner:', currentWinner);
+                            this.showMoveAnimation('perpetual-check', {winner: currentWinner});
+                        } else if (currentStatus === 'perpetual-chase') {
+                            console.log('♾️ Showing perpetual chase animation, winner:', currentWinner);
+                            this.showMoveAnimation('perpetual-chase', {winner: currentWinner});
                         } else if (g.lastMove && g.lastMove.isCheckmate) {
-                            console.log('🏆 Showing checkmate animation for winner:', g.winner);
-                            this.showMoveAnimation('checkmate', {winner: g.winner});
+                            console.log('🏆 Showing checkmate animation for winner:', currentWinner);
+                            this.showMoveAnimation('checkmate', {winner: currentWinner});
                         } else if (g.lastMove && g.lastMove.isStalemate) {
                             console.log('🤝 Showing stalemate animation');
                             this.showMoveAnimation('stalemate');
@@ -1175,10 +1061,23 @@ export class XQApp {
                 } else {
                     console.log('⏭️ Skipping animation - stale move from completed game (age: ' + Math.round(moveAge/1000) + 's)');
                 }
+
+                // Check for perpetual check warning (progressive: 3, 4, 5, 6 checks)
+                if (this.gameState.status === 'playing' && this.gameState.moveHistory) {
+                    const checkInfo = this.engine.getConsecutiveCheckCount(this.gameState.moveHistory);
+                    if (checkInfo.count >= 3 && checkInfo.count < 7) {
+                        this.showPerpetualCheckWarning(checkInfo.count, checkInfo.checker);
+                    } else {
+                        this.hidePerpetualCheckWarning();
+                    }
+                } else if (this.gameState.status !== 'playing') {
+                    this.hidePerpetualCheckWarning();
+                }
             }
 
             // Check for game-ending statuses that don't involve a move (like resignation)
-            if (g.status === 'finished' && g.reason === 'resignation' && g.winner) {
+            // But NEVER announce on a fresh game with no moves (stale data from previous game)
+            if (g.status === 'finished' && g.reason === 'resignation' && g.winner && g.history && g.history.length > 0) {
                 // Use finishedAt timestamp to track if we've already shown this resignation
                 const resignationTimestamp = g.finishedAt || Date.now();
 
@@ -1194,6 +1093,11 @@ export class XQApp {
 
                     this.lastResignationTimestamp = resignationTimestamp;
                     setTimeout(() => {
+                        // Safety: only show if game is still finished (not restarted)
+                        if (this.gameState?.status === 'playing') {
+                            console.log('⏭️ Skipping stale resignation animation - new game already started');
+                            return;
+                        }
                         this.showMoveAnimation('resignation', {winner: g.winner});
                     }, 200);
                 } else {
@@ -1205,11 +1109,7 @@ export class XQApp {
             if (g.status === 'playing' && g.board) {
                 console.log('♟️ Attempting to render pieces...');
 
-                // Start timer if not already started (but not during battle start splash)
-                // Timer will be started automatically after splash ends
-                if (!this.timerInterval && !battleJustStarted) {
-                    this.startTimer();
-                }
+                // Timer display will be started automatically by syncGame
 
                 // Reconstruct 2D array from flattened string
                 let board2D;
@@ -1274,8 +1174,8 @@ export class XQApp {
                 const hintsLayer = document.getElementById('hints-layer');
                 if (hintsLayer) hintsLayer.innerHTML = "";
 
-                // Stop timer when game is not active
-                this.stopTimer();
+                // Stop timer display when game is not active
+                this.stopTimerDisplay();
 
                 // Update controls when game ends to hide RESIGN/OFFER DRAW buttons
                 this.updateInGameControls();
@@ -1380,7 +1280,17 @@ export class XQApp {
 
         if (iAmOwner && !isMySlot && isOccupied && !gameActive) {
             const opponentName = side === 'red' ? this.table.playerRed?.name : this.table.playerBlack?.name;
-            console.log('✅ Showing BOOT option for:', opponentName);
+            console.log('✅ Showing owner actions for opponent:', opponentName);
+
+            // Swap seats - only when no battle request is pending
+            if (!battleRequested) {
+                actions.push({
+                    label: `🔄 SWAP SEATS`,
+                    action: () => this.swapSeats(),
+                    color: '#3498db'
+                });
+            }
+
             actions.push({
                 label: `🥾 BOOT ${opponentName?.toUpperCase()}`,
                 action: () => this.bootPlayer(side),
@@ -1576,6 +1486,56 @@ export class XQApp {
         } catch (error) {
             console.error('❌ Boot error:', error);
             this.showStatus("Failed to boot player: " + error.message, "red");
+        }
+    }
+
+    async swapSeats() {
+        if (!this.user) return;
+
+        console.log('🔄 Table owner swapping seats with opponent...');
+
+        const tRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'regions', this.rid, 'tables', this.tid);
+        const freshSnap = await getDoc(tRef);
+        const t = freshSnap.data();
+
+        // Verify I'm the table owner
+        if (t?.tableOwner?.uid !== this.user.uid) {
+            this.showStatus("Only the table owner can swap seats!", "red");
+            return;
+        }
+
+        // Verify game is not active
+        if (this.gameState?.status === 'playing') {
+            this.showStatus("Cannot swap during active game!", "red");
+            return;
+        }
+
+        // Verify no battle request is pending
+        if (t?.battleRequest) {
+            this.showStatus("Cannot swap while battle request is pending!", "red");
+            return;
+        }
+
+        // Verify both players are seated
+        if (!t?.playerRed || !t?.playerBlack) {
+            this.showStatus("Both seats must be occupied to swap!", "red");
+            return;
+        }
+
+        try {
+            const redPlayer = { ...t.playerRed };
+            const blackPlayer = { ...t.playerBlack };
+
+            await setDoc(tRef, {
+                playerRed: blackPlayer,
+                playerBlack: redPlayer
+            }, { merge: true });
+
+            console.log(`✅ Swapped seats: ${redPlayer.name} → Black, ${blackPlayer.name} → Red`);
+            this.showStatus("Seats swapped!", "gold");
+        } catch (error) {
+            console.error('❌ Swap seats error:', error);
+            this.showStatus("Failed to swap seats: " + error.message, "red");
         }
     }
 
@@ -2089,6 +2049,97 @@ export class XQApp {
         }, { merge: true });
 
         this.showStatus("Battle requested! Waiting for opponent...", "gold");
+
+        // Start requester-side countdown to boot opponent if no response
+        this.startRequesterCountdown();
+    }
+
+    startRequesterCountdown() {
+        // Clear any existing countdown
+        if (this.requesterCountdownTimer) {
+            clearInterval(this.requesterCountdownTimer);
+            this.requesterCountdownTimer = null;
+        }
+
+        let timeLeft = 10;
+        console.log('⏱️ Requester countdown started: 10 seconds to respond');
+
+        this.requesterCountdownTimer = setInterval(async () => {
+            timeLeft--;
+            console.log(`⏱️ Requester countdown: ${timeLeft}s remaining`);
+
+            if (timeLeft <= 0) {
+                clearInterval(this.requesterCountdownTimer);
+                this.requesterCountdownTimer = null;
+                console.log('⏰ Opponent did not respond - booting from seat');
+                await this.requesterTimeoutBoot();
+            }
+        }, 1000);
+    }
+
+    async requesterTimeoutBoot() {
+        console.log('🥾 Requester booting non-responding opponent...');
+
+        const tRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'regions', this.rid, 'tables', this.tid);
+
+        try {
+            const freshSnap = await getDoc(tRef);
+            const t = freshSnap.data();
+
+            // Check if battle request still exists (opponent hasn't responded)
+            if (!t?.battleRequest || t.battleRequest.from !== this.user.uid) {
+                console.log('ℹ️ Battle request already resolved, skip boot');
+                return;
+            }
+
+            // Find the opponent's seat (the one who is NOT me)
+            const iAmRed = t?.playerRed?.uid === this.user.uid;
+            const iAmBlack = t?.playerBlack?.uid === this.user.uid;
+            const opponentSeatKey = iAmRed ? 'playerBlack' : (iAmBlack ? 'playerRed' : null);
+            const opponentData = iAmRed ? t?.playerBlack : t?.playerRed;
+
+            if (!opponentSeatKey || !opponentData) {
+                console.warn('⚠️ Cannot boot - opponent not found');
+                return;
+            }
+
+            const opponentName = opponentData.name || 'Opponent';
+
+            const updates = {
+                battleRequest: deleteField(),
+                [opponentSeatKey]: deleteField(),
+                battleTimeout: {
+                    bootedUid: opponentData.uid,
+                    bootedName: opponentName,
+                    requestedBy: this.user.uid,
+                    timestamp: Date.now()
+                }
+            };
+
+            // Transfer table ownership if opponent was the owner
+            const opponentIsOwner = t?.tableOwner?.uid === opponentData.uid;
+            if (opponentIsOwner) {
+                updates.tableOwner = {
+                    uid: this.user.uid,
+                    name: this.profile?.playerName || this.user.email?.split('@')[0],
+                    since: Date.now()
+                };
+                console.log('👑 Transferring table ownership to requester (me)');
+            }
+
+            await setDoc(tRef, updates, { merge: true });
+            console.log(`✅ Booted ${opponentName} for not responding`);
+            this.showStatus(`${opponentName} did not respond — removed from seat`, "gold");
+
+            // Auto-clear timeout notification after 6 seconds
+            setTimeout(async () => {
+                await setDoc(tRef, {
+                    battleTimeout: deleteField()
+                }, { merge: true });
+            }, 6000);
+        } catch (error) {
+            console.error('❌ Requester timeout boot error:', error);
+        }
     }
 
     async acceptBattle() {
@@ -2106,6 +2157,11 @@ export class XQApp {
 
     async engageBattle() {
         console.log('⚔️ Engaging battle...');
+
+        // Reset local state tracking to prevent old game announcements from replaying
+        this.lastMoveTimestamp = null;
+        this.hasCompletedFirstSync = false;
+        this.lastResignationTimestamp = null;
 
         // Note: Battle splash will be shown automatically by syncGame() listener for ALL players
 
@@ -2131,12 +2187,23 @@ export class XQApp {
         console.log('📋 Flattened board:', flatBoard);
 
         try {
+            // CRITICAL FIX: Split into two operations to ensure history is properly cleared
+            // First, clear the history arrays completely (cannot reliably clear arrays with merge:true + arrayUnion)
             await setDoc(gameRef, {
                 board: flatBoard,
                 status: 'playing',
                 turn: 'red',
                 history: [],
-                moveHistory: [], // Clear move history for repetition detection
+                moveHistory: [],
+                lastMove: deleteField(), // Clear previous game's last move (prevents stale announcements)
+                startedAt: Date.now(), // Track when game started
+                finishedAt: deleteField(), // Clear previous game's finish time
+                winner: deleteField(), // Clear previous winner
+                reason: deleteField() // Clear previous finish reason
+            }, { merge: true });
+
+            // Then add the chat message separately
+            await setDoc(gameRef, {
                 chat: arrayUnion({
                     user: 'SYSTEM',
                     text: '⚔️ Battle has begun! Red moves first.',
@@ -2144,7 +2211,7 @@ export class XQApp {
                 })
             }, { merge: true });
 
-            console.log('✅ Game state saved to Firestore');
+            console.log('✅ Game state saved to Firestore (history cleared for new game)');
 
             await setDoc(doc(this.db, 'artifacts', this.appId, 'public', 'data', 'regions', this.rid, 'tables', this.tid), {
                 matchActive: true
@@ -2257,9 +2324,27 @@ export class XQApp {
     async executeMove(toX, toY) {
         if (!this.selectedPiece) return;
 
+        // Prevent double-click: if a move is already in progress, ignore
+        if (this.isMoving) return;
+        this.isMoving = true;
+
+        try {
+
+        // Clear hints immediately to prevent second click on same hint
+        const hintsLayer = document.getElementById('hints-layer');
+        if (hintsLayer) hintsLayer.innerHTML = "";
+
         // These are already actual board coordinates
         const fromX = this.selectedPiece.x;
         const fromY = this.selectedPiece.y;
+
+        // CRITICAL FIX: Prevent moving piece to same square (would delete the piece!)
+        if (fromX === toX && fromY === toY) {
+            console.warn('⚠️ Attempted to move piece to same square - ignoring');
+            this.isMoving = false;
+            this.deselectPiece();
+            return;
+        }
 
         // Check if this is a capture move
         const capturedPiece = this.gameState.board[toY][toX];
@@ -2353,10 +2438,11 @@ export class XQApp {
             // NOTE: Don't show animation here - Firebase sync will trigger it for ALL clients
         } else if (isStalemate) {
             newStatus = 'stalemate';
+            winner = 'draw';  // ✅ Fixed: Stalemate is a draw, set winner explicitly
             // NOTE: Don't show animation here - Firebase sync will trigger it for ALL clients
         } else if (isRepetition) {
             newStatus = 'draw';
-            winner = null;
+            winner = 'draw';  // ✅ Fixed: Use 'draw' instead of null for consistency
             console.log('🔁 3-fold repetition detected! Game is a draw.');
         } else if (perpetualCheck) {
             newStatus = 'perpetual-check';
@@ -2369,20 +2455,21 @@ export class XQApp {
         }
         // NOTE: Check animation will also be triggered by Firebase sync
 
-        // CRITICAL: Calculate and save timer values to Firebase (SOURCE OF TRUTH)
+        // NEW TIMESTAMP-BASED TIMER: Calculate time used and update Firebase
         const now = Date.now();
         const gameSnap = await getDoc(gameRef);
         const currentGameData = gameSnap.data();
-
-        const lastUpdate = currentGameData?.lastTimerUpdate || now;
-        const elapsedSeconds = Math.floor((now - lastUpdate) / 1000);
 
         // Get increment from region
         const regionRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'regions', this.rid);
         const regionSnap = await getDoc(regionRef);
         const increment = regionSnap.data()?.increment || 0;
 
-        // Calculate new timer values
+        // Calculate elapsed time since turn started
+        const turnStartTime = currentGameData?.turnStartTime || now;
+        const elapsedSeconds = Math.floor((now - turnStartTime) / 1000);
+
+        // Get current timer values
         let newRedTime = currentGameData?.redTimeLeft || 900;
         let newBlackTime = currentGameData?.blackTimeLeft || 900;
 
@@ -2393,17 +2480,17 @@ export class XQApp {
             newBlackTime = Math.max(0, newBlackTime - elapsedSeconds + increment);
         }
 
-        console.log(`⏱️ FIREBASE TIMER UPDATE: Red=${newRedTime}s, Black=${newBlackTime}s, Elapsed=${elapsedSeconds}s, Increment=${increment}s`);
+        console.log(`⏱️ TIMESTAMP UPDATE: Red=${newRedTime}s, Black=${newBlackTime}s, Elapsed=${elapsedSeconds}s, Increment=${increment}s`);
 
         const updateData = {
             board: flatBoard,
             turn: nextTurn,
             lastMove: moveData,
             history: arrayUnion(moveData),
-            moveHistory: arrayUnion(moveRecord), // Track board positions for repetition detection
+            moveHistory: arrayUnion(moveRecord),
             redTimeLeft: newRedTime,
             blackTimeLeft: newBlackTime,
-            lastTimerUpdate: now
+            turnStartTime: now // NEW turn starts now
         };
 
         if (newStatus !== 'playing') {
@@ -2419,11 +2506,18 @@ export class XQApp {
             await this.saveGameToHistory(gameWinner, newStatus);
         }
 
-        // Clear selection
+        // Clear selection and release move lock
         this.selectedPiece = null;
         this.validMoves = [];
-        const hintsLayer = document.getElementById('hints-layer');
-        if (hintsLayer) hintsLayer.innerHTML = "";
+        this.isMoving = false;
+
+        } catch (error) {
+            console.error('❌ executeMove error:', error);
+            this.showStatus("⚠️ Move error: " + error.message, "red");
+            this.selectedPiece = null;
+            this.validMoves = [];
+            this.isMoving = false;
+        }
     }
 
     async resign() {
@@ -2454,6 +2548,14 @@ export class XQApp {
         // Update game status
         const gameRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'games', this.tid);
         const resignationTime = Date.now();
+
+        console.log('🏳️ RESIGNATION: Saving to Firebase:', {
+            winner: winner,
+            reason: 'resignation',
+            myColor: myColor,
+            tableId: this.tid
+        });
+
         await setDoc(gameRef, {
             status: 'finished',
             winner: winner,
@@ -2466,8 +2568,12 @@ export class XQApp {
             })
         }, { merge: true });
 
+        console.log('✅ RESIGNATION: Firebase updated, now saving to history...');
+
         // Save game to history
         await this.saveGameToHistory(winner, 'resignation');
+
+        console.log('✅ RESIGNATION: History saved successfully');
 
         this.showStatus("You have resigned", "red");
     }
@@ -2670,10 +2776,11 @@ export class XQApp {
             }
 
             if (timeLeft <= 0) {
-                // Auto-reject
-                this.rejectBattleRequest();
+                // Auto-dismiss modal - requester handles the boot
                 clearInterval(this.battleRequestCountdownTimer);
                 this.battleRequestCountdownTimer = null;
+                const modal = document.getElementById('battle-request-modal');
+                if (modal) modal.style.display = 'none';
             }
         }, 1000);
     }
@@ -2739,6 +2846,75 @@ export class XQApp {
         }, 6000);
     }
 
+    async timeoutBattleRequest() {
+        console.log('⏰ Battle request timed out - booting non-responding player...');
+
+        // Hide modal
+        const modal = document.getElementById('battle-request-modal');
+        if (modal) modal.style.display = 'none';
+
+        // Get the current battle request to know who requested it
+        const currentRequest = this.table?.battleRequest;
+
+        // Determine which seat I (the non-responder) am sitting in
+        const iAmRed = this.table?.playerRed?.uid === this.user?.uid;
+        const iAmBlack = this.table?.playerBlack?.uid === this.user?.uid;
+        const mySeatKey = iAmRed ? 'playerRed' : (iAmBlack ? 'playerBlack' : null);
+
+        if (!mySeatKey) {
+            console.warn('⚠️ Cannot boot - not seated');
+            return;
+        }
+
+        const tRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'regions', this.rid, 'tables', this.tid);
+
+        try {
+            // Fetch fresh table data for ownership transfer
+            const freshSnap = await getDoc(tRef);
+            const t = freshSnap.data();
+
+            const updates = {
+                battleRequest: deleteField(),
+                [mySeatKey]: deleteField(),
+                battleTimeout: {
+                    bootedUid: this.user.uid,
+                    bootedName: this.profile?.playerName || this.user.email?.split('@')[0] || 'Player',
+                    requestedBy: currentRequest?.from,
+                    timestamp: Date.now()
+                }
+            };
+
+            // Handle table ownership transfer if I was the owner
+            const iAmOwner = t?.tableOwner?.uid === this.user.uid;
+            if (iAmOwner) {
+                const opponent = iAmRed ? t?.playerBlack : t?.playerRed;
+                if (opponent) {
+                    updates.tableOwner = {
+                        uid: opponent.uid,
+                        name: opponent.name,
+                        since: Date.now()
+                    };
+                    console.log('👑 Transferring table ownership to:', opponent.name);
+                } else {
+                    updates.tableOwner = deleteField();
+                }
+            }
+
+            await setDoc(tRef, updates, { merge: true });
+            console.log('✅ Non-responding player booted from seat');
+            this.showStatus("You did not respond - removed from seat", "red");
+
+            // Auto-clear timeout notification after 6 seconds
+            setTimeout(async () => {
+                await setDoc(tRef, {
+                    battleTimeout: deleteField()
+                }, { merge: true });
+            }, 6000);
+        } catch (error) {
+            console.error('❌ Timeout boot error:', error);
+        }
+    }
+
     checkBattleRejectionNotification() {
         const battleRejection = this.table?.battleRejection;
         const notification = document.getElementById('battle-rejected-notification');
@@ -2796,6 +2972,38 @@ export class XQApp {
                 this.battleRejectionCountdownTimer = null;
             }
         }, 1000);
+    }
+
+    checkBattleTimeoutNotification() {
+        const battleTimeout = this.table?.battleTimeout;
+        const notification = document.getElementById('battle-rejected-notification');
+
+        if (!notification) return;
+
+        // Only show if I'm the one who requested the battle (the requester sees opponent got booted)
+        const iAmRequester = battleTimeout && battleTimeout.requestedBy === this.user?.uid;
+
+        if (iAmRequester) {
+            // Reuse the rejection notification UI to show timeout message
+            notification.style.display = 'block';
+
+            const message = document.getElementById('battle-rejected-message');
+            if (message) {
+                message.innerText = `${battleTimeout.bootedName} did not respond — removed from seat`;
+            }
+
+            // Update the title to show TIMED OUT instead of DECLINED
+            const titleEl = notification.querySelector('h2');
+            if (titleEl) {
+                titleEl.innerText = 'NO RESPONSE';
+                titleEl.style.color = '#cd3333';
+            }
+
+            // Start countdown if not already running
+            if (!this.battleRejectionCountdownTimer) {
+                this.startBattleRejectionCountdown();
+            }
+        }
     }
 
     showStatus(msg, color = "gold") {
@@ -2879,9 +3087,9 @@ export class XQApp {
     async showMoveAnimation(type, data = {}) {
         console.log('🎭 showMoveAnimation called:', type, data);
 
-        // Show game-over image even if animations are disabled (for all game-ending results)
+        // Transfer table ownership to winner (no game-over image)
         if ((type === 'checkmate' || type === 'perpetual-check' || type === 'perpetual-chase' || type === 'resignation' || type === 'timeout') && data.winner) {
-            this.showGameOverImage(data.winner);
+            this.transferOwnershipToWinner(data.winner);
         }
 
         // Check if animations are enabled for the sidebar animation
@@ -3025,6 +3233,59 @@ export class XQApp {
             chineseEl.style.whiteSpace = 'normal';
             englishEl.style.whiteSpace = 'normal';
         }, duration);
+    }
+
+    /**
+     * Show perpetual check warning banner (non-blocking, doesn't cover chess board)
+     * @param {number} count - Current consecutive check count (3-6)
+     * @param {string} checker - 'red' or 'black' - the player doing the checking
+     */
+    showPerpetualCheckWarning(count, checker) {
+        const warningEl = document.getElementById('perpetual-check-warning');
+        if (!warningEl) return;
+
+        const remaining = 7 - count;
+        const checkerName = checker === 'red' ? '红方' : '黑方';
+        const checkerNameEn = checker === 'red' ? 'Red' : 'Black';
+
+        // Determine if the current user is the one checking
+        const iAmRed = this.table?.playerRed?.uid === this.user?.uid;
+        const iAmBlack = this.table?.playerBlack?.uid === this.user?.uid;
+        const myColor = iAmRed ? 'red' : (iAmBlack ? 'black' : null);
+        const isMyWarning = myColor === checker;
+
+        let message, messageEn;
+        if (isMyWarning) {
+            message = `⚠️ 你已连续将军 ${count} 次！再将 ${remaining} 次将判负！`;
+            messageEn = `You've checked ${count} times! ${remaining} more = LOSS!`;
+        } else {
+            message = `⚠️ ${checkerName}已连续将军 ${count} 次 (${remaining} 次后判负)`;
+            messageEn = `${checkerNameEn} checked ${count} times (${remaining} more = loss)`;
+        }
+
+        warningEl.innerHTML = `<div class="warning-text-cn">${message}</div><div class="warning-text-en">${messageEn}</div>`;
+        warningEl.style.display = 'flex';
+
+        // Color intensity based on count
+        if (count >= 6) {
+            warningEl.className = 'perpetual-check-warning warning-critical';
+        } else if (count >= 5) {
+            warningEl.className = 'perpetual-check-warning warning-high';
+        } else {
+            warningEl.className = 'perpetual-check-warning warning-medium';
+        }
+
+        console.log(`⚠️ Perpetual check warning: ${checker} has ${count} consecutive checks`);
+    }
+
+    /**
+     * Hide perpetual check warning banner
+     */
+    hidePerpetualCheckWarning() {
+        const warningEl = document.getElementById('perpetual-check-warning');
+        if (warningEl) {
+            warningEl.style.display = 'none';
+        }
     }
 
     /**
@@ -3673,50 +3934,167 @@ export class XQApp {
     }
 
     /**
+     * Manual save game - triggered by user clicking "Save Game" button
+     * Determines winner based on current game state
+     */
+    async manualSaveGame() {
+        try {
+            console.log('💾 Manual save game triggered by user...');
+
+            // Check if there's a game to save
+            if (!this.gameState) {
+                this.showStatus("No game data to save!", "red");
+                return;
+            }
+
+            const history = this.gameState.history || [];
+            if (history.length === 0) {
+                this.showStatus("No moves to save - play some moves first!", "red");
+                return;
+            }
+
+            // If game already ended and was auto-saved, inform user
+            const saveKey = `${this.tid}_histor_saved`;
+            if (this[saveKey] && this.gameState.status !== 'playing') {
+                this.showStatus("✅ Game was already saved automatically!", "gold");
+                console.log('ℹ️ Manual save skipped - game already auto-saved after ending');
+                return;
+            }
+
+            // Determine winner and reason from game state
+            let winner = this.gameState.winner || null;
+            let reason = this.gameState.reason || this.gameState.status || 'manual-save';
+
+            // If game is still playing, save as "in-progress"
+            if (this.gameState.status === 'playing') {
+                winner = 'in-progress';
+                reason = 'manual-save';
+            }
+
+            // Reset the duplicate save flag to allow manual save
+            this[saveKey] = false;
+
+            // Call the actual save function
+            await this.saveGameToHistory(winner, reason);
+
+            this.showStatus("✅ Game saved to history!", "gold");
+            console.log('✅ Manual save completed successfully');
+
+        } catch (error) {
+            console.error('❌ Manual save error:', error);
+            this.showStatus("Failed to save game: " + error.message, "red");
+        }
+    }
+
+    /**
      * Save completed game to players' history
      * Stores up to 500 games per player, auto-purging oldest games
      * @param {string} winner - 'red', 'black', or 'draw'
      * @param {string} reason - 'checkmate', 'resignation', 'draw', 'timeout', etc.
      */
     async saveGameToHistory(winner, reason) {
+        const saveKey = `${this.tid}_histor_saved`;
         try {
             console.log('💾 Saving game to history...', { winner, reason });
+
+            // Prevent duplicate saves - check if already saved for this game
+            if (this[saveKey]) {
+                console.log('⚠️ Game already saved to history, skipping duplicate save');
+                return;
+            }
+            this[saveKey] = true;
 
             // Ensure both players exist
             if (!this.table?.playerRed?.uid || !this.table?.playerBlack?.uid) {
                 console.log('⚠️ Cannot save game - missing player data');
+                console.log('  playerRed:', JSON.stringify(this.table?.playerRed));
+                console.log('  playerBlack:', JSON.stringify(this.table?.playerBlack));
+                this[saveKey] = false;
+                this.showStatus("⚠️ Cannot save - missing player data", "red");
                 return;
             }
 
             const redPlayer = this.table.playerRed;
             const blackPlayer = this.table.playerBlack;
 
-            // Get game data
+            // Get game data - retry up to 3 times with delay to handle Firestore latency
             const gameRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'games', this.tid);
-            const gameSnap = await getDoc(gameRef);
+            let gameData = null;
+            let history = [];
 
-            if (!gameSnap.exists()) {
-                console.log('⚠️ Game data not found');
-                return;
+            for (let attempt = 1; attempt <= 3; attempt++) {
+                const gameSnap = await getDoc(gameRef);
+
+                if (!gameSnap.exists()) {
+                    console.log(`⚠️ Game data not found (attempt ${attempt}/3)`);
+                    if (attempt < 3) {
+                        await new Promise(r => setTimeout(r, 1000));
+                        continue;
+                    }
+                    this[saveKey] = false;
+                    this.showStatus("⚠️ Game data not found - record not saved", "red");
+                    return;
+                }
+
+                gameData = gameSnap.data();
+                history = gameData.history || [];
+
+                if (history.length > 0) break;
+
+                // History might be empty due to Firestore latency after arrayUnion write
+                console.log(`⚠️ History empty (attempt ${attempt}/3), retrying...`);
+                if (attempt < 3) {
+                    await new Promise(r => setTimeout(r, 1000));
+                }
             }
 
-            const gameData = gameSnap.data();
-            const history = gameData.history || [];
+            // If still no history after retries, try using local gameState as fallback
+            if (history.length === 0 && this.gameState?.history?.length > 0) {
+                console.log('📋 Using local gameState history as fallback');
+                history = this.gameState.history;
+            }
 
             if (history.length === 0) {
-                console.log('⚠️ No moves to save - game has no history');
+                console.log('⚠️ No moves to save - game has no history even after retries');
+                this[saveKey] = false;
+                this.showStatus("⚠️ No moves to save - game record not saved", "red");
                 return;
             }
 
-            // Convert history to both ICCS and Chinese notation
-            const movesICCS = history.map(move => this.moveToICCS(move));
-            const movesChinese = history.map((move, index) => this.moveToChineseNotation(move, index));
+            console.log(`📋 Got ${history.length} moves from history`);
+
+            // Convert history to both ICCS and Chinese notation (with safety checks)
+            const movesICCS = [];
+            const movesChinese = [];
+            for (let i = 0; i < history.length; i++) {
+                const move = history[i];
+                try {
+                    if (move?.from && move?.to) {
+                        movesICCS.push(this.moveToICCS(move));
+                        movesChinese.push(this.moveToChineseNotation(move, i));
+                    } else {
+                        console.warn(`⚠️ Skipping malformed move at index ${i}:`, move);
+                        movesICCS.push(`?${i}`);
+                        movesChinese.push(`?${i}`);
+                    }
+                } catch (moveErr) {
+                    console.warn(`⚠️ Error converting move ${i}:`, moveErr);
+                    movesICCS.push(`?${i}`);
+                    movesChinese.push(`?${i}`);
+                }
+            }
 
             // Get initial FEN (standard starting position)
             const fenStart = "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1";
 
             // Get final FEN from current board state
-            const fenEnd = this.engine.boardToFEN(this.gameState.board, this.gameState.turn);
+            let fenEnd = '';
+            try {
+                fenEnd = this.engine.boardToFEN(this.gameState.board, this.gameState.turn);
+            } catch (fenErr) {
+                console.warn('⚠️ Could not generate FEN:', fenErr);
+                fenEnd = 'unknown';
+            }
 
             // Calculate game duration (using timestamps if available)
             const gameStartTime = gameData.startedAt || Date.now();
@@ -3727,9 +4105,13 @@ export class XQApp {
             const isMobile = /Mobi|Android/i.test(navigator.userAgent);
             const source = isMobile ? 'mobile' : 'pc';
 
+            // Generate unique game ID (table ID + timestamp to allow multiple games per table)
+            const uniqueGameId = `${this.tid}_${gameEndTime}`;
+
             // Create game record
             const gameRecord = {
-                gameId: this.tid,
+                gameId: uniqueGameId,
+                tableId: this.tid,
                 regionId: this.rid,
                 playerRed: {
                     uid: redPlayer.uid,
@@ -3754,115 +4136,158 @@ export class XQApp {
             };
 
             console.log('📝 Game record prepared:', {
-                gameId: this.tid,
+                gameId: uniqueGameId,
                 players: `${redPlayer.playerName} vs ${blackPlayer.playerName}`,
                 moves: history.length,
                 winner: winner
             });
 
-            // Import ELO system
-            const { eloSystem } = await import('./elo-system.js');
+            // Only calculate ELO for completed games (not in-progress saves)
+            const isCompletedGame = winner === 'red' || winner === 'black' || winner === 'draw';
 
-            // Load current ELO ratings and games played for both players
-            const redProfileRef = doc(this.db, 'artifacts', this.appId, 'users', redPlayer.uid, 'profile', 'data');
-            const blackProfileRef = doc(this.db, 'artifacts', this.appId, 'users', blackPlayer.uid, 'profile', 'data');
+            if (isCompletedGame) {
+                try {
+                    // Import ELO system
+                    const { eloSystem } = await import('./elo-system.js');
 
-            const [redProfileSnap, blackProfileSnap] = await Promise.all([
-                getDoc(redProfileRef),
-                getDoc(blackProfileRef)
-            ]);
+                    // Load current ELO ratings and games played for both players
+                    const redProfileRef = doc(this.db, 'artifacts', this.appId, 'users', redPlayer.uid, 'profile', 'data');
+                    const blackProfileRef = doc(this.db, 'artifacts', this.appId, 'users', blackPlayer.uid, 'profile', 'data');
 
-            // Get current ratings (default to starting ELO if not set)
-            const redProfile = redProfileSnap.exists() ? redProfileSnap.data() : {};
-            const blackProfile = blackProfileSnap.exists() ? blackProfileSnap.data() : {};
+                    const [redProfileSnap, blackProfileSnap] = await Promise.all([
+                        getDoc(redProfileRef),
+                        getDoc(blackProfileRef)
+                    ]);
 
-            const redCurrentELO = redProfile.elo || eloSystem.STARTING_ELO;
-            const blackCurrentELO = blackProfile.elo || eloSystem.STARTING_ELO;
-            const redGamesPlayed = redProfile.gamesPlayed || 0;
-            const blackGamesPlayed = blackProfile.gamesPlayed || 0;
+                    // Get current ratings (default to starting ELO if not set)
+                    const redProfile = redProfileSnap.exists() ? redProfileSnap.data() : {};
+                    const blackProfile = blackProfileSnap.exists() ? blackProfileSnap.data() : {};
 
-            // Calculate ELO changes
-            const eloChanges = eloSystem.calculateGameRatings({
-                redPlayer: {
-                    uid: redPlayer.uid,
-                    elo: redCurrentELO,
-                    gamesPlayed: redGamesPlayed
-                },
-                blackPlayer: {
-                    uid: blackPlayer.uid,
-                    elo: blackCurrentELO,
-                    gamesPlayed: blackGamesPlayed
-                },
-                winner: winner
-            });
+                    const redCurrentELO = redProfile.elo || eloSystem.STARTING_ELO;
+                    const blackCurrentELO = blackProfile.elo || eloSystem.STARTING_ELO;
+                    const redGamesPlayed = redProfile.gamesPlayed || 0;
+                    const blackGamesPlayed = blackProfile.gamesPlayed || 0;
 
-            console.log('🎯 ELO Changes:', {
-                red: `${redCurrentELO} → ${eloChanges.red.newRating} (${eloSystem.formatELOChange(eloChanges.red.change)})`,
-                black: `${blackCurrentELO} → ${eloChanges.black.newRating} (${eloSystem.formatELOChange(eloChanges.black.change)})`
-            });
+                    // Calculate ELO changes
+                    const eloChanges = eloSystem.calculateGameRatings({
+                        redPlayer: {
+                            uid: redPlayer.uid,
+                            elo: redCurrentELO,
+                            gamesPlayed: redGamesPlayed
+                        },
+                        blackPlayer: {
+                            uid: blackPlayer.uid,
+                            elo: blackCurrentELO,
+                            gamesPlayed: blackGamesPlayed
+                        },
+                        winner: winner
+                    });
 
-            // Add ELO data to game record
-            gameRecord.eloChanges = {
-                red: {
-                    oldRating: eloChanges.red.oldRating,
-                    newRating: eloChanges.red.newRating,
-                    change: eloChanges.red.change
-                },
-                black: {
-                    oldRating: eloChanges.black.oldRating,
-                    newRating: eloChanges.black.newRating,
-                    change: eloChanges.black.change
+                    console.log('🎯 ELO Changes:', {
+                        red: `${redCurrentELO} → ${eloChanges.red.newRating} (${eloSystem.formatELOChange(eloChanges.red.change)})`,
+                        black: `${blackCurrentELO} → ${eloChanges.black.newRating} (${eloSystem.formatELOChange(eloChanges.black.change)})`
+                    });
+
+                    // Add ELO data to game record
+                    gameRecord.eloChanges = {
+                        red: {
+                            oldRating: eloChanges.red.oldRating,
+                            newRating: eloChanges.red.newRating,
+                            change: eloChanges.red.change
+                        },
+                        black: {
+                            oldRating: eloChanges.black.oldRating,
+                            newRating: eloChanges.black.newRating,
+                            change: eloChanges.black.change
+                        }
+                    };
+
+                    // Update player profiles with new ELO ratings (use setDoc with merge to create if doesn't exist)
+                    await setDoc(redProfileRef, {
+                        elo: eloChanges.red.newRating,
+                        gamesPlayed: redGamesPlayed + 1,
+                        lastGameAt: gameEndTime
+                    }, { merge: true });
+
+                    await setDoc(blackProfileRef, {
+                        elo: eloChanges.black.newRating,
+                        gamesPlayed: blackGamesPlayed + 1,
+                        lastGameAt: gameEndTime
+                    }, { merge: true });
+
+                    console.log('✅ Player profiles updated with new ELO ratings');
+                } catch (eloError) {
+                    // ELO failure should NOT prevent game record from being saved
+                    console.error('⚠️ ELO calculation failed, saving game record without ELO:', eloError);
+                    gameRecord.eloError = eloError.message;
                 }
-            };
-
-            // Update player profiles with new ELO ratings
-            await updateDoc(redProfileRef, {
-                elo: eloChanges.red.newRating,
-                gamesPlayed: redGamesPlayed + 1,
-                lastGameAt: gameEndTime
-            });
-
-            await updateDoc(blackProfileRef, {
-                elo: eloChanges.black.newRating,
-                gamesPlayed: blackGamesPlayed + 1,
-                lastGameAt: gameEndTime
-            });
-
-            console.log('✅ Player profiles updated with new ELO ratings');
+            } else {
+                console.log('ℹ️ Skipping ELO update for in-progress game save');
+            }
 
             // Import collection and query functions
-            const { collection, query, orderBy, limit, getDocs, deleteDoc } = await import('https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js');
+            const { collection, query, where, orderBy, limit, getDocs, deleteDoc } = await import('https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js');
 
-            // Save to both players' history
-            for (const player of [redPlayer, blackPlayer]) {
-                const historyRef = doc(this.db, 'artifacts', this.appId, 'users', player.uid, 'game-history', this.tid);
-
-                await setDoc(historyRef, gameRecord);
-                console.log(`✅ Game saved to ${player.playerName}'s history`);
-
-                // Check if player has more than 500 games
-                const playerHistoryRef = collection(this.db, 'artifacts', this.appId, 'users', player.uid, 'game-history');
-                const historyQuery = query(playerHistoryRef, orderBy('completedAt', 'desc'));
-                const historySnap = await getDocs(historyQuery);
-
-                if (historySnap.size > 500) {
-                    // Delete oldest games beyond 500
-                    const gamesToDelete = historySnap.size - 500;
-                    console.log(`🗑️ Purging ${gamesToDelete} oldest games for ${player.playerName}`);
-
-                    const allGames = historySnap.docs;
-                    for (let i = 500; i < allGames.length; i++) {
-                        await deleteDoc(allGames[i].ref);
+            // ========== DUPLICATE CHECK ==========
+            // For completed games, check if this table already has a saved record with same move count
+            // This prevents double-saves from manual save after auto-save, or race conditions
+            if (winner !== 'in-progress') {
+                try {
+                    const centralCollection = collection(this.db, 'artifacts', this.appId, 'public', 'data', 'all-game-history');
+                    const dupQuery = query(centralCollection, where('tableId', '==', this.tid), where('totalMoves', '==', history.length));
+                    const dupSnap = await getDocs(dupQuery);
+                    if (!dupSnap.empty) {
+                        console.log(`⚠️ Duplicate detected: table ${this.tid} with ${history.length} moves already saved. Skipping.`);
+                        this.showStatus("✅ Game already saved!", "gold");
+                        return;
                     }
-                    console.log(`✅ Purged ${gamesToDelete} old games`);
+                } catch (dupErr) {
+                    console.warn('⚠️ Duplicate check failed (proceeding with save):', dupErr);
                 }
             }
 
-            console.log('✅ Game history saved successfully for both players');
+            // ========== CENTRALIZED SAVE (source of truth) ==========
+            const centralRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'all-game-history', uniqueGameId);
+            await setDoc(centralRef, gameRecord);
+            console.log('✅ Game saved to CENTRALIZED all-game-history collection');
+
+            // ========== PER-PLAYER SAVE (backward compatibility) ==========
+            for (const player of [redPlayer, blackPlayer]) {
+                try {
+                    const historyRef = doc(this.db, 'artifacts', this.appId, 'users', player.uid, 'game-history', uniqueGameId);
+                    await setDoc(historyRef, gameRecord);
+                    console.log(`✅ Game saved to ${player.playerName}'s personal history`);
+
+                    // Check if player has more than 500 games (non-blocking)
+                    const playerHistoryRef = collection(this.db, 'artifacts', this.appId, 'users', player.uid, 'game-history');
+                    const historyQuery = query(playerHistoryRef, orderBy('completedAt', 'desc'));
+                    const historySnap = await getDocs(historyQuery);
+
+                    if (historySnap.size > 500) {
+                        const gamesToDelete = historySnap.size - 500;
+                        console.log(`🗑️ Purging ${gamesToDelete} oldest games for ${player.playerName}`);
+
+                        const allGames = historySnap.docs;
+                        for (let i = 500; i < allGames.length; i++) {
+                            await deleteDoc(allGames[i].ref);
+                        }
+                        console.log(`✅ Purged ${gamesToDelete} old games`);
+                    }
+                } catch (perPlayerErr) {
+                    console.warn(`⚠️ Per-player save failed for ${player.playerName} (non-critical):`, perPlayerErr);
+                }
+            }
+
+            console.log('✅ Game history saved successfully');
+            this.showStatus("✅ Game record saved!", "gold");
 
         } catch (error) {
             console.error('❌ Error saving game to history:', error);
-            // Don't alert user - this is a background operation
+            console.error('❌ Error details:', error.message, error.stack);
+            // Reset save flag so retry is possible
+            this[saveKey] = false;
+            // Show error to user so they know the save failed
+            this.showStatus("⚠️ Failed to save game: " + error.message, "red");
         }
     }
 }

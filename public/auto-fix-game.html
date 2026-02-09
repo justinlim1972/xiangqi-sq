@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Auto Fix Game Record</title>
+    <style>
+        body { font-family: monospace; padding: 20px; background: #1e293b; color: white; }
+        button { padding: 15px 30px; margin: 10px; font-size: 18px; cursor: pointer; }
+        .fix-btn { background: #10b981; color: white; border: none; border-radius: 8px; font-weight: bold; }
+        .error { color: #ef4444; background: #7f1d1d; padding: 10px; margin: 10px 0; border-radius: 4px; }
+        .success { color: #10b981; background: #064e3b; padding: 10px; margin: 10px 0; border-radius: 4px; }
+        .info { color: #3b82f6; background: #1e3a8a; padding: 10px; margin: 10px 0; border-radius: 4px; }
+        input { padding: 12px; margin: 5px; width: 400px; font-size: 16px; }
+        label { display: block; margin-top: 15px; font-weight: bold; }
+        #output { margin-top: 30px; }
+        h1 { color: #10b981; }
+    </style>
+</head>
+<body>
+    <h1>🔧 Auto Fix Latest Game Record</h1>
+    <p style="color: #94a3b8;">This will find your latest game with CHSPrimary and fix it automatically.</p>
+
+    <div>
+        <label>Your Player Name (Winner - Red):</label>
+        <input type="text" id="redName" value="行百里半九十" />
+
+        <label>Opponent Name (Loser - Black):</label>
+        <input type="text" id="blackName" value="CHSPrimary" />
+
+        <br><br>
+        <button class="fix-btn" onclick="autoFixGame()">🔧 AUTO-FIX MY LATEST GAME NOW!</button>
+    </div>
+
+    <div id="output"></div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, getDocs, doc, updateDoc, query, orderBy } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyDq_LECOrc4SY90SyDsBQGmwl-YnUNFIj8",
+            authDomain: "xiangqi-sq.firebaseapp.com",
+            projectId: "xiangqi-sq",
+            storageBucket: "xiangqi-sq.firebasestorage.app",
+            messagingSenderId: "351923336298",
+            appId: "1:351923336298:web:e7278ea095ba085ac4935b"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = "sg-xiangqi";
+
+        let currentUser = null;
+
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                currentUser = user;
+                document.getElementById('output').innerHTML = '<p class="info">✅ Logged in as: ' + user.email + '</p>';
+            } else {
+                window.location.href = '../index.html';
+            }
+        });
+
+        window.autoFixGame = async function() {
+            const output = document.getElementById('output');
+            output.innerHTML = '<p class="info">🔄 Finding your latest game...</p>';
+
+            try {
+                if (!currentUser) {
+                    output.innerHTML = '<p class="error">❌ Not logged in!</p>';
+                    return;
+                }
+
+                const redName = document.getElementById('redName').value;
+                const blackName = document.getElementById('blackName').value;
+
+                // Get current user's game history
+                const historyRef = collection(db, 'artifacts', appId, 'users', currentUser.uid, 'game-history');
+                const historyQuery = query(historyRef, orderBy('completedAt', 'desc'));
+                const historySnap = await getDocs(historyQuery);
+
+                output.innerHTML += `<p class="info">📋 Found ${historySnap.size} games in your history</p>`;
+
+                // Find the game with CHSPrimary
+                let targetGame = null;
+                historySnap.forEach(doc => {
+                    const game = doc.data();
+                    if (!targetGame &&
+                        ((game.playerRed.playerName === redName && game.playerBlack.playerName === blackName) ||
+                         (game.playerRed.playerName === blackName && game.playerBlack.playerName === redName))) {
+                        targetGame = { id: doc.id, ...game };
+                    }
+                });
+
+                if (!targetGame) {
+                    output.innerHTML += '<p class="error">❌ Could not find a game between ' + redName + ' and ' + blackName + '</p>';
+                    return;
+                }
+
+                output.innerHTML += `<p class="success">✅ Found game: ${targetGame.gameId}</p>`;
+                output.innerHTML += `<p class="info">Current winner: ${targetGame.winner}</p>`;
+                output.innerHTML += `<p class="info">Current reason: ${targetGame.reason}</p>`;
+
+                const redUid = targetGame.playerRed.uid;
+                const blackUid = targetGame.playerBlack.uid;
+
+                // Fix game history for both players
+                const redGameRef = doc(db, 'artifacts', appId, 'users', redUid, 'game-history', targetGame.gameId);
+                const blackGameRef = doc(db, 'artifacts', appId, 'users', blackUid, 'game-history', targetGame.gameId);
+
+                const gameUpdate = {
+                    winner: 'red',
+                    reason: 'resignation',
+                    'eloChanges.red.oldRating': 1200,
+                    'eloChanges.red.newRating': 1216,
+                    'eloChanges.red.change': 16,
+                    'eloChanges.black.oldRating': 1200,
+                    'eloChanges.black.newRating': 1184,
+                    'eloChanges.black.change': -16
+                };
+
+                await updateDoc(redGameRef, gameUpdate);
+                await updateDoc(blackGameRef, gameUpdate);
+
+                output.innerHTML += '<p class="success">✅ Game history updated for both players</p>';
+
+                // Fix player profiles
+                const redProfileRef = doc(db, 'artifacts', appId, 'users', redUid, 'profile', 'data');
+                const blackProfileRef = doc(db, 'artifacts', appId, 'users', blackUid, 'profile', 'data');
+
+                await updateDoc(redProfileRef, { elo: 1216 });
+                await updateDoc(blackProfileRef, { elo: 1184 });
+
+                output.innerHTML += '<p class="success">✅ Player ELO ratings updated</p>';
+                output.innerHTML += '<p class="success" style="font-size: 24px; font-weight: bold;">🎉 GAME FIXED SUCCESSFULLY!</p>';
+                output.innerHTML += '<p class="info">Red (行百里半九十): 1200 → 1216 (+16) ✅</p>';
+                output.innerHTML += '<p class="info">Black (CHSPrimary): 1200 → 1184 (-16) ✅</p>';
+                output.innerHTML += '<p class="success">Refresh your game records page to see the updated stats!</p>';
+
+            } catch (error) {
+                output.innerHTML += `<p class="error">❌ Error: ${error.message}</p>`;
+                console.error(error);
+            }
+        };
+    </script>
+</body>
+</html>

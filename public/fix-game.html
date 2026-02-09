@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Fix Game Record</title>
+    <style>
+        body { font-family: monospace; padding: 20px; background: #1e293b; color: white; }
+        button { padding: 10px 20px; margin: 10px; font-size: 16px; cursor: pointer; }
+        .fix-btn { background: #10b981; color: white; border: none; border-radius: 4px; }
+        .error { color: #ef4444; }
+        .success { color: #10b981; }
+        input { padding: 8px; margin: 5px; width: 300px; }
+        label { display: block; margin-top: 15px; }
+    </style>
+</head>
+<body>
+    <h1>🔧 Fix Game Record</h1>
+
+    <div>
+        <label>Red Player Name (Winner):</label>
+        <input type="text" id="redName" value="行百里半九十" />
+
+        <label>Black Player Name (Loser):</label>
+        <input type="text" id="blackName" value="CHSPrimary" />
+
+        <label>Game ID (from URL or game record):</label>
+        <input type="text" id="gameId" placeholder="Enter game ID" />
+
+        <label>Red Player UID:</label>
+        <input type="text" id="redUid" placeholder="Get from Firebase Console" />
+
+        <label>Black Player UID:</label>
+        <input type="text" id="blackUid" placeholder="Get from Firebase Console" />
+
+        <br><br>
+        <button class="fix-btn" onclick="fixGame()">🔧 FIX GAME NOW</button>
+    </div>
+
+    <div id="output" style="margin-top: 20px;"></div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, updateDoc, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyDq_LECOrc4SY90SyDsBQGmwl-YnUNFIj8",
+            authDomain: "xiangqi-sq.firebaseapp.com",
+            projectId: "xiangqi-sq",
+            storageBucket: "xiangqi-sq.firebasestorage.app",
+            messagingSenderId: "351923336298",
+            appId: "1:351923336298:web:e7278ea095ba085ac4935b"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = "sg-xiangqi";
+
+        window.fixGame = async function() {
+            const output = document.getElementById('output');
+            output.innerHTML = '<p>🔄 Fixing game...</p>';
+
+            try {
+                const gameId = document.getElementById('gameId').value;
+                const redUid = document.getElementById('redUid').value;
+                const blackUid = document.getElementById('blackUid').value;
+
+                if (!gameId || !redUid || !blackUid) {
+                    output.innerHTML = '<p class="error">❌ Please fill in all fields!</p>';
+                    return;
+                }
+
+                // Fix game history for both players
+                const redGameRef = doc(db, 'artifacts', appId, 'users', redUid, 'game-history', gameId);
+                const blackGameRef = doc(db, 'artifacts', appId, 'users', blackUid, 'game-history', gameId);
+
+                const gameUpdate = {
+                    winner: 'red',
+                    reason: 'resignation',
+                    'eloChanges.red.oldRating': 1200,
+                    'eloChanges.red.newRating': 1216,
+                    'eloChanges.red.change': 16,
+                    'eloChanges.black.oldRating': 1200,
+                    'eloChanges.black.newRating': 1184,
+                    'eloChanges.black.change': -16
+                };
+
+                await updateDoc(redGameRef, gameUpdate);
+                await updateDoc(blackGameRef, gameUpdate);
+
+                output.innerHTML += '<p class="success">✅ Game history updated for both players</p>';
+
+                // Fix player profiles
+                const redProfileRef = doc(db, 'artifacts', appId, 'users', redUid, 'profile', 'data');
+                const blackProfileRef = doc(db, 'artifacts', appId, 'users', blackUid, 'profile', 'data');
+
+                await updateDoc(redProfileRef, { elo: 1216 });
+                await updateDoc(blackProfileRef, { elo: 1184 });
+
+                output.innerHTML += '<p class="success">✅ Player ELO ratings updated</p>';
+                output.innerHTML += '<p class="success"><strong>🎉 GAME FIXED SUCCESSFULLY!</strong></p>';
+                output.innerHTML += '<p>Red (行百里半九十): 1200 → 1216 (+16)</p>';
+                output.innerHTML += '<p>Black (CHSPrimary): 1200 → 1184 (-16)</p>';
+
+            } catch (error) {
+                output.innerHTML += `<p class="error">❌ Error: ${error.message}</p>`;
+                console.error(error);
+            }
+        };
+    </script>
+</body>
+</html>

@@ -214,30 +214,37 @@
         .p-avatar img { width: 100%; height: 100%; object-fit: cover; }
 
         /* PRESENCE LIST - SCROLLABLE */
-        .presence-header { 
-            background: #000; padding: 10px 15px; border-bottom: 1px solid #222; 
-            display: flex; justify-content: space-between; align-items: center; 
+        .presence-header {
+            background: #000; padding: 10px 15px; border-bottom: 1px solid #222;
+            display: flex; justify-content: space-between; align-items: center;
+            flex-shrink: 0;
         }
-        .presence-header span { 
-            font-size: 0.6rem; color: var(--gold); 
-            font-weight: 900; letter-spacing: 2px; 
+        .presence-header span {
+            font-size: 0.6rem; color: var(--gold);
+            font-weight: 900; letter-spacing: 2px;
         }
-        
+
         #presence-list {
-            max-height: 200px; overflow-y: auto;
-            background: #050505; border-bottom: 1px solid #222;
+            min-height: 120px;
+            max-height: 260px;
+            overflow-y: auto;
+            background: #050505;
+            border-bottom: 1px solid #222;
+            flex-shrink: 0;
         }
-        .presence-item { 
-            padding: 8px 12px; font-size: 0.65rem; display: flex; flex-direction: column; 
-            border-bottom: 1px solid rgba(255,255,255,0.05);
-            background: white; color: black; /* DEFAULT OBSERVER */
+        .presence-item {
+            padding: 10px 12px; font-size: 0.75rem; display: flex; align-items: center; gap: 10px;
+            border-bottom: 1px solid rgba(255,255,255,0.08);
+            background: #1a1a1a; color: #ccc;
             transition: 0.3s;
         }
-        .presence-item strong { display: block; font-weight: 900; text-transform: uppercase; }
-        .presence-item em { font-size: 0.55rem; opacity: 0.6; font-style: normal; display: block; }
+        .presence-item .presence-info { display: flex; flex-direction: column; }
+        .presence-item strong { font-weight: 900; text-transform: uppercase; font-size: 0.8rem; }
+        .presence-item em { font-size: 0.6rem; opacity: 0.5; font-style: normal; }
 
-        .p-red { background: var(--primary) !important; color: white !important; }
-        .p-black { background: #000 !important; color: white !important; border-bottom-color: #333 !important; }
+        .p-red { background: var(--primary) !important; color: white !important; border-bottom-color: rgba(255,255,255,0.1) !important; }
+        .p-black { background: #111 !important; color: white !important; border-left: 3px solid #3b82f6 !important; }
+        .p-observer { background: #1a1a1a !important; color: #999 !important; }
 
         /* BUTTONS */
         .btn-action { 
@@ -250,9 +257,9 @@
         .btn-green { background: #27ae60; color: white; margin-top: 10px; }
         .btn-action:disabled { opacity: 0.3; cursor: not-allowed; }
 
-        #chat-log { 
-            flex-grow: 1; overflow-y: auto; padding: 15px; 
-            background: #050505; font-size: 0.8rem; 
+        #chat-log {
+            flex: 1 1 0; min-height: 150px; overflow-y: auto; padding: 15px;
+            background: #050505; font-size: 0.8rem;
         }
         .chat-msg { 
             margin-bottom: 8px; padding: 8px 12px; 
@@ -260,7 +267,7 @@
             border-left: 3px solid var(--gold); 
         }
         
-        .chat-input { padding: 12px; background: #000; border-top: 1px solid #222; }
+        .chat-input { padding: 12px; background: #000; border-top: 1px solid #222; flex-shrink: 0; }
         .chat-input input { 
             width: 100%; background: #111; border: 1px solid #333; 
             color: white; padding: 12px; border-radius: 8px; 
@@ -287,8 +294,8 @@
 
         /* TAB CONTENT */
         .tab-content {
-            display: none; flex: 1; overflow-y: auto;
-            padding-bottom: 300px; /* Generous padding to allow scrolling past chat input on tablets */
+            display: none; flex: 1; overflow: hidden;
+            min-height: 0; /* Allow flex child to shrink properly */
         }
         .tab-content.active {
             display: flex; flex-direction: column;
@@ -416,6 +423,56 @@
                 transform: translate(-50%, -50%) scale(1.1);
             }
         }
+        /* Perpetual Check Warning Banner */
+        .perpetual-check-warning {
+            display: none;
+            position: fixed;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 9999;
+            padding: 8px 20px;
+            border-radius: 10px;
+            flex-direction: column;
+            align-items: center;
+            gap: 2px;
+            pointer-events: none;
+            animation: warningPulse 1.5s ease-in-out infinite;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            max-width: 90vw;
+            text-align: center;
+        }
+        .perpetual-check-warning .warning-text-cn {
+            font-size: 1rem;
+            font-weight: 700;
+            color: #fff;
+        }
+        .perpetual-check-warning .warning-text-en {
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: rgba(255,255,255,0.85);
+        }
+        .warning-medium {
+            background: rgba(230, 126, 34, 0.92);
+            border: 2px solid #e67e22;
+        }
+        .warning-high {
+            background: rgba(231, 76, 60, 0.92);
+            border: 2px solid #e74c3c;
+        }
+        .warning-critical {
+            background: rgba(192, 57, 43, 0.95);
+            border: 2px solid #c0392b;
+            animation: warningPulseCritical 0.8s ease-in-out infinite;
+        }
+        @keyframes warningPulse {
+            0%, 100% { opacity: 0.9; }
+            50% { opacity: 1; }
+        }
+        @keyframes warningPulseCritical {
+            0%, 100% { opacity: 0.85; transform: translateX(-50%) scale(1); }
+            50% { opacity: 1; transform: translateX(-50%) scale(1.03); }
+        }
     </style>
 </head>
 <body>
@@ -502,6 +559,9 @@
         </div>
     </div>
 </main>
+
+<!-- Perpetual Check Warning Banner (non-blocking) -->
+<div id="perpetual-check-warning" class="perpetual-check-warning" style="display: none;"></div>
 
 <div id="sidebar">
     <!-- Tab Navigation -->
@@ -645,6 +705,9 @@
                     <button class="btn-action" onclick="app.copyFEN()" style="flex: 1; background: #2c3e50; padding: 8px; font-size: 0.75rem;">📋 COPY FEN</button>
                     <button class="btn-action" onclick="app.exportPGN()" style="flex: 1; background: var(--primary); padding: 8px; font-size: 0.75rem;">💾 EXPORT PGN</button>
                 </div>
+                <div style="margin-top: 8px;">
+                    <button class="btn-action" id="btn-save-game" onclick="app.manualSaveGame()" style="width: 100%; background: #27ae60; padding: 10px; font-size: 0.8rem; font-weight: 900;">💾 SAVE GAME TO HISTORY</button>
+                </div>
             </div>
 
             <!-- Move History -->
@@ -766,7 +829,7 @@
 <script src="./debug-logger.js"></script>
 
 <script type="module">
-    import { XQApp } from "./xq-app-FIX-INCREMENT.js?v=112&t=1737520000";
+    import { XQApp } from "./xq-app-FIX-INCREMENT.js?v=208&t=1770700003";
     // Initialize the Orchestrator which manages all modules (Engine, UI, Firebase)
     window.app = new XQApp();
     window.app.init();

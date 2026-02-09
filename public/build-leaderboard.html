@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>🏆 Build Leaderboard</title>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            padding: 40px;
+            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+            color: white;
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+        h1 { color: #10b981; }
+        .btn {
+            background: #3b82f6;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            margin: 10px 5px;
+        }
+        .btn:hover { background: #2563eb; }
+        .step {
+            background: #1e3a8a;
+            padding: 15px 20px;
+            margin: 10px 0;
+            border-radius: 8px;
+            border-left: 4px solid #3b82f6;
+        }
+        .step.done {
+            background: #065f46;
+            border-left-color: #10b981;
+        }
+        .step.error {
+            background: #7f1d1d;
+            border-left-color: #ef4444;
+        }
+        code {
+            background: #0f172a;
+            padding: 3px 8px;
+            border-radius: 4px;
+            color: #10b981;
+        }
+    </style>
+</head>
+<body>
+    <h1>🏆 Build Centralized Leaderboard</h1>
+    <p>This will create a single leaderboard document with all players' stats.</p>
+
+    <button class="btn" onclick="buildLeaderboard()">🚀 Build Leaderboard</button>
+
+    <div id="output"></div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, doc, getDocs, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyDq_LECOrc4SY90SyDsBQGmwl-YnUNFIj8",
+            authDomain: "xiangqi-sq.firebaseapp.com",
+            projectId: "xiangqi-sq",
+            storageBucket: "xiangqi-sq.firebasestorage.app",
+            messagingSenderId: "351923336298",
+            appId: "1:351923336298:web:e7278ea095ba085ac4935b"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = "sg-xiangqi";
+        const output = document.getElementById('output');
+
+        function addStep(html, status = 'active') {
+            const div = document.createElement('div');
+            div.className = `step ${status}`;
+            div.innerHTML = html;
+            output.appendChild(div);
+            return div;
+        }
+
+        window.buildLeaderboard = async function() {
+            output.innerHTML = '';
+
+            try {
+                addStep('🔍 Scanning all registered users...', 'active');
+
+                // Get all usernames
+                const usernamesRef = collection(db, 'artifacts', appId, 'public', 'data', 'usernames');
+                const usernamesSnap = await getDocs(usernamesRef);
+
+                addStep(`✅ Found ${usernamesSnap.size} registered users`, 'done');
+
+                const players = [];
+                let processed = 0;
+
+                addStep('📊 Collecting player stats...', 'active');
+
+                for (const usernameDoc of usernamesSnap.docs) {
+                    const userData = usernameDoc.data();
+                    const uid = userData.uid;
+                    const playerName = userData.username || usernameDoc.id;
+
+                    if (!uid) continue;
+
+                    try {
+                        // Get profile data
+                        const profileRef = doc(db, 'artifacts', appId, 'users', uid, 'profile', 'data');
+                        const profileSnap = await getDoc(profileRef);
+
+                        // Get game history to count wins/losses/draws
+                        const historyRef = collection(db, 'artifacts', appId, 'users', uid, 'game-history');
+                        const historySnap = await getDocs(historyRef);
+
+                        let wins = 0, losses = 0, draws = 0;
+                        let lastGameAt = 0;
+
+                        historySnap.forEach(gameDoc => {
+                            const game = gameDoc.data();
+                            if (game.completedAt > lastGameAt) {
+                                lastGameAt = game.completedAt;
+                            }
+
+                            if (game.winner === 'draw') {
+                                draws++;
+                            } else {
+                                // Check if this user won
+                                const userColor = game.playerRed?.uid === uid ? 'red' : 'black';
+                                if (game.winner === userColor) {
+                                    wins++;
+                                } else {
+                                    losses++;
+                                }
+                            }
+                        });
+
+                        const profileData = profileSnap.exists() ? profileSnap.data() : {};
+
+                        players.push({
+                            uid: uid,
+                            playerName: playerName,
+                            elo: profileData.elo || 1200,
+                            gamesPlayed: historySnap.size,
+                            wins: wins,
+                            losses: losses,
+                            draws: draws,
+                            lastGameAt: lastGameAt || Date.now()
+                        });
+
+                        processed++;
+                        if (processed % 5 === 0) {
+                            addStep(`📥 Processed ${processed}/${usernamesSnap.size} players...`, 'done');
+                        }
+
+                    } catch (err) {
+                        console.log(`⚠️ Cannot read data for ${playerName}:`, err.message);
+                    }
+                }
+
+                addStep(`✅ Collected stats for ${players.length} players`, 'done');
+
+                // Sort by ELO (highest first)
+                players.sort((a, b) => b.elo - a.elo);
+
+                addStep('💾 Saving to centralized leaderboard...', 'active');
+
+                // Save to leaderboard document (correct path with even segments)
+                const leaderboardRef = doc(db, 'artifacts', appId, 'leaderboard', 'rankings');
+                await setDoc(leaderboardRef, {
+                    players: players,
+                    updatedAt: Date.now(),
+                    totalPlayers: players.length
+                });
+
+                addStep('✅ Leaderboard saved successfully!', 'done');
+                addStep(`
+                    <h3 style="color:#10b981; margin-top:20px;">🎉 Success!</h3>
+                    <p>Centralized leaderboard created with ${players.length} players.</p>
+                    <p><strong>Top 5 Players:</strong></p>
+                    <ul style="margin:10px 0;">
+                        ${players.slice(0, 5).map((p, i) => `
+                            <li>${i + 1}. ${p.playerName} - ELO ${p.elo} (${p.wins}W ${p.losses}L ${p.draws}D)</li>
+                        `).join('')}
+                    </ul>
+                    <a href="game/ranking.html" class="btn">🏆 View Rankings</a>
+                `, 'done');
+
+            } catch (error) {
+                addStep(`❌ Error: ${error.message}`, 'error');
+                console.error(error);
+            }
+        };
+    </script>
+</body>
+</html>

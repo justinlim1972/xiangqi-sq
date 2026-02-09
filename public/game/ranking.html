@@ -355,7 +355,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, getDocs, query, orderBy, limit } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, doc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { eloSystem } from './elo-system.js';
 
         const firebaseConfig = {
@@ -390,90 +390,59 @@
 
             async loadRankings() {
                 try {
-                    console.log('📊 Loading player rankings...');
+                    console.log('📊 Loading player rankings from centralized leaderboard...');
 
-                    // Get all usernames
-                    const usernamesRef = collection(db, 'artifacts', appId, 'public', 'data', 'usernames');
-                    const usernamesSnap = await getDocs(usernamesRef);
+                    // Read from centralized leaderboard
+                    const leaderboardRef = doc(db, 'artifacts', appId, 'leaderboard', 'rankings');
+                    const leaderboardSnap = await getDoc(leaderboardRef);
 
-                    console.log(`Found ${usernamesSnap.size} registered users`);
-
-                    const players = [];
-
-                    // For each user, get their profile and game history
-                    for (const usernameDoc of usernamesSnap.docs) {
-                        const userData = usernameDoc.data();
-                        const uid = userData.uid;
-
-                        if (!uid) continue;
-
-                        try {
-                            // Get profile data
-                            const profileRef = collection(db, 'artifacts', appId, 'users', uid, 'profile');
-                            const profileSnap = await getDocs(profileRef);
-
-                            let profile = { elo: 1200, gamesPlayed: 0 };
-                            profileSnap.forEach(doc => {
-                                if (doc.id === 'data') {
-                                    profile = doc.data();
-                                }
-                            });
-
-                            // Get game history to calculate win/loss/draw
-                            const historyRef = collection(db, 'artifacts', appId, 'users', uid, 'game-history');
-                            const historySnap = await getDocs(historyRef);
-
-                            let wins = 0, losses = 0, draws = 0;
-
-                            historySnap.forEach(doc => {
-                                const game = doc.data();
-                                const isRed = game.playerRed?.uid === uid;
-                                const isBlack = game.playerBlack?.uid === uid;
-                                const myColor = isRed ? 'red' : 'black';
-
-                                if (game.winner === 'draw') {
-                                    draws++;
-                                } else if (game.winner === myColor) {
-                                    wins++;
-                                } else {
-                                    losses++;
-                                }
-                            });
-
-                            const totalGames = wins + losses + draws;
-                            const winRate = totalGames > 0 ? (wins / totalGames * 100) : 0;
-
-                            players.push({
-                                uid: uid,
-                                playerName: profile.playerName || userData.playerName || 'Unknown',
-                                email: profile.email || userData.email || '',
-                                elo: profile.elo || 1200,
-                                gamesPlayed: totalGames,
-                                wins: wins,
-                                losses: losses,
-                                draws: draws,
-                                winRate: winRate,
-                                provisional: totalGames < 30
-                            });
-
-                        } catch (err) {
-                            console.log(`Error loading data for user ${uid}:`, err.message);
-                        }
+                    if (!leaderboardSnap.exists()) {
+                        console.warn('⚠️ Leaderboard not found. Please run build-leaderboard.html first.');
+                        document.getElementById('ranking-body').innerHTML = `
+                            <div class="empty-state">
+                                <div class="empty-state-icon">📊</div>
+                                <h3>Leaderboard Not Built</h3>
+                                <p>Please run the leaderboard builder first.</p>
+                                <a href="../../build-leaderboard.html" class="btn-back" style="display:inline-block;margin-top:15px;">Build Leaderboard</a>
+                            </div>
+                        `;
+                        return;
                     }
 
-                    // Sort by ELO (highest first)
-                    players.sort((a, b) => b.elo - a.elo);
+                    const leaderboardData = leaderboardSnap.data();
+                    const players = leaderboardData.players || [];
 
-                    // Take top 100
-                    this.players = players.slice(0, 100);
+                    console.log(`✅ Loaded ${players.length} players from centralized leaderboard`);
+                    console.log(`📅 Last updated: ${new Date(leaderboardData.updatedAt).toLocaleString()}`);
 
-                    console.log(`✅ Loaded ${this.players.length} players for ranking`);
+                    // Transform data to match expected format and calculate provisional status
+                    this.players = players.map(player => {
+                        const totalGames = player.gamesPlayed || 0;
+                        const winRate = totalGames > 0 ? (player.wins / totalGames * 100) : 0;
+
+                        return {
+                            uid: player.uid,
+                            playerName: player.playerName || 'Unknown',
+                            elo: player.elo || 1200,
+                            gamesPlayed: totalGames,
+                            wins: player.wins || 0,
+                            losses: player.losses || 0,
+                            draws: player.draws || 0,
+                            winRate: winRate,
+                            provisional: totalGames < 30
+                        };
+                    });
+
+                    // Already sorted by ELO from leaderboard builder, take top 100
+                    this.players = this.players.slice(0, 100);
+
+                    console.log('📋 Sample player data:', this.players.slice(0, 3));
 
                     this.updateStats();
                     this.renderRankings();
 
                 } catch (error) {
-                    console.error('Error loading rankings:', error);
+                    console.error('❌ Error loading rankings:', error);
                     document.getElementById('ranking-body').innerHTML = `
                         <div class="empty-state">
                             <div class="empty-state-icon">❌</div>
@@ -545,16 +514,20 @@
                                 </div>
                             </div>
                             <div class="elo-rating ${categoryClass}">${player.elo}${provisional}</div>
-                            <div class="games-played hide-mobile">${player.gamesPlayed}</div>
+                            <div class="games-played hide-mobile">
+                                ${player.gamesPlayed > 0 ? player.gamesPlayed : '<span style="color:#94a3b8;">0</span>'}
+                            </div>
                             <div class="win-rate ${winRateClass} hide-mobile">
-                                ${player.gamesPlayed > 0 ? player.winRate.toFixed(1) + '%' : 'N/A'}
+                                ${player.gamesPlayed > 0 ? player.winRate.toFixed(1) + '%' : '<span style="color:#94a3b8;">-</span>'}
                             </div>
                             <div class="record hide-mobile">
+                                ${player.gamesPlayed > 0 ? `
                                 <div class="record-stats">
                                     <span class="wins">${player.wins}W</span>
                                     <span class="losses">${player.losses}L</span>
                                     <span class="draws">${player.draws}D</span>
                                 </div>
+                                ` : '<span style="color:#94a3b8;">No games yet</span>'}
                             </div>
                         </div>
                     `;

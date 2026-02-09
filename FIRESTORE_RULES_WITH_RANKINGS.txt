@@ -1,0 +1,72 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper function to check if user is admin
+    function isAdmin(appId) {
+      return request.auth != null &&
+             exists(/databases/$(database)/documents/artifacts/$(appId)/users/$(request.auth.uid)/profile/data) &&
+             get(/databases/$(database)/documents/artifacts/$(appId)/users/$(request.auth.uid)/profile/data).data.role == 'admin';
+    }
+
+    // Helper function to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // PUBLIC DATA - Anyone authenticated can read
+    match /artifacts/{appId}/public/{document=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin(appId);
+    }
+
+    // USERNAME REGISTRY - Anyone authenticated can read (for rankings)
+    match /artifacts/{appId}/public/data/usernames/{username} {
+      allow read: if isAuthenticated();
+      allow write: if isAuthenticated();
+    }
+
+    // USER PROFILES - Readable by anyone authenticated (for rankings), writable by owner or admin
+    match /artifacts/{appId}/users/{userId}/profile/{document=**} {
+      // Anyone authenticated can read profiles (needed for rankings)
+      allow read: if isAuthenticated();
+
+      // Only the user or admin can write their profile
+      allow write: if isAuthenticated() && (request.auth.uid == userId || isAdmin(appId));
+    }
+
+    // GAME HISTORY - Readable by anyone authenticated (for rankings), writable during game save
+    match /artifacts/{appId}/users/{userId}/game-history/{gameId} {
+      // Anyone authenticated can read game history (needed for rankings and leaderboards)
+      allow read: if isAuthenticated();
+
+      // Allow writes during game completion (when saving game history)
+      allow write: if isAuthenticated();
+
+      // Allow delete by owner or admin
+      allow delete: if isAuthenticated() && (request.auth.uid == userId || isAdmin(appId));
+    }
+
+    // USER SETTINGS - Private, only owner can access
+    match /artifacts/{appId}/users/{userId}/settings/{document=**} {
+      allow read, write: if isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // BUG REPORTS - Authenticated users can write, admins can read
+    match /artifacts/{appId}/bug-reports/{reportId} {
+      allow create: if isAuthenticated();
+      allow read: if isAdmin(appId);
+      allow update, delete: if isAdmin(appId);
+    }
+
+    // MAHJONG COLLECTION - User can access their own collection
+    match /artifacts/{appId}/users/{userId}/collection/{document=**} {
+      allow read, write: if isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Deny all other requests by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

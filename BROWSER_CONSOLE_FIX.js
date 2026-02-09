@@ -1,0 +1,62 @@
+// Run this in browser console on any logged-in page of your app
+
+(async function() {
+    const { getFirestore, doc, setDoc } = await import('https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js');
+
+    const db = getFirestore();
+    const appId = "sg-xiangqi";
+    const redUid = "OQXCLt4YmlXFoTGLD4MvpRN5utc2";
+    const blackUid = "7Ab3sPTyZRNCdkmeYDzOOlq4Tn2";
+    const gameId = "WIN_MANUAL_1737914832";
+
+    const gameRecord = {
+        gameId: gameId,
+        regionId: "Onmr4zpqo2bFwu442ED4",
+        playerRed: {
+            uid: redUid,
+            playerName: "行百里半九十",
+            email: "imyeeshun@live.com"
+        },
+        playerBlack: {
+            uid: blackUid,
+            playerName: "CHSPrimary",
+            email: ""
+        },
+        winner: "red",
+        reason: "resignation",
+        completedAt: 1737914832000,
+        movesICCS: ["h2e2", "b9c7", "b2b6", "i9i4", "h0g2", "h7g7", "b0c2", "a9a5", "i0i1", "a6a5", "a0a1", "b7e7", "g3g4", "g6g5", "i1i6", "e9g7", "g4g5", "h9g7", "g2e3", "i6i1", "b6e6", "a5a4", "e3g4", "g9e7", "e6e7", "e7e4", "g4f6", "e4e6", "i6h6", "e6e5", "h6h3", "i1h1", "e0e1", "e5e9", "e2e8", "g7f5", "e8e1", "e9i9", "f6e4", "i4i0", "e4f6", "f5e7", "f6e4", "i0i1", "e4d6", "i1i2", "d6i1", "c7e8", "i1i2", "e8c9", "e1e8", "h1g1", "e8c8", "c9e7", "c8c1"],
+        movesChinese: ["炮二平五", "馬８進７", "馬二進三", "車９進８", "炮八進六", "炮２平５", "馬八進七", "車１進２", "車九進八", "車１平４", "兵六进五", "炮８進６", "車九平八", "象７進９", "兵七进一", "炮８退４", "兵七进六", "車４進２", "車八进六", "炮８平４", "馬七進八", "炮４平６", "炮六进七", "車８進５", "炮七進七", "士４進５", "馬八進六", "炮５平６", "炮五進四", "將５進４", "炮五退二", "炮６進５", "相七進五", "炮５進２", "兵三进一", "車８退７", "馬三進四", "車７進１", "車一进二", "車７进六", "炮五进六", "將４進５", "馬四進三", "車６退２", "炮六进五", "將５進４", "馬六退五", "車６退１", "炮五退九", "馬１退３", "馬三進１", "炮６退９", "車二進６", "馬７退８", "炮九进二", "馬８進６", "車二平一"],
+        pgnNotation: "[Event \"SG Xiangqi Match\"]\n[Site \"xiangqi-sq.web.app\"]\n[Date \"2026.01.26\"]\n[Round \"1\"]\n[Red \"行百里半九十\"]\n[Black \"CHSPrimary\"]\n[Result \"1-0\"]\n\n1. C25 H8+7 2. H2+3 R98 3. C86 C25 4. H8+7 R1+2 5. R98 R14 6. A6+5 H2+1 7. P7+1 P7+1 8. R1+1 C8+6 9. R8+5 E7+9 10. P7+1 C8-4 11. P76 R4+2 12. R86 C84 13. H7+8 C46 14. C67 R8+5 15. C7+7 A4+5 16. H8+6 C56 17. C5+4 K54 18. C5-2 C65 19. E7+5 C5+2 20. P3+1 R87 21. H3+4 R7+1 22. R12 R76 23. C56 K45 24. H4+3 R6-2 25. C65 K54 26. H6-5 R6-1 27. C59 H1-3 28. H3+1 C69 29. R2+6 H7-8 30. C92 H8+6 31. R21 1-0",
+        fenStart: "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1",
+        fenEnd: "2bak4/4a4/4b4/p1p3p1p/2n6/9/6P1P/1C2N4/4A4/R1BAK1B1R w - - 0 1",
+        totalMoves: 31,
+        duration: 1800000,
+        source: "pc",
+        eloChanges: {
+            red: {
+                oldRating: 1201,
+                newRating: 1216,
+                change: 15
+            },
+            black: {
+                oldRating: 1200,
+                newRating: 1184,
+                change: -16
+            }
+        }
+    };
+
+    console.log("🔄 Adding winning game to both players' history...");
+
+    const redGameRef = doc(db, 'artifacts', appId, 'users', redUid, 'game-history', gameId);
+    const blackGameRef = doc(db, 'artifacts', appId, 'users', blackUid, 'game-history', gameId);
+
+    await setDoc(redGameRef, gameRecord);
+    console.log("✅ Game saved to 行百里半九十's history");
+
+    await setDoc(blackGameRef, gameRecord);
+    console.log("✅ Game saved to CHSPrimary's history");
+
+    console.log("🎉 DONE! Refresh your game records and ranking pages");
+})();

@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>🔍 Check Firebase Game Records</title>
+    <meta charset="UTF-8">
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            padding: 40px;
+            background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+            color: white;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        h1 { color: #10b981; }
+        .game-card {
+            background: #1e3a8a;
+            border-left: 4px solid #3b82f6;
+            padding: 20px;
+            margin: 15px 0;
+            border-radius: 8px;
+        }
+        .error {
+            background: #7f1d1d;
+            border-left: 4px solid #ef4444;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+        }
+        code {
+            background: #0f172a;
+            padding: 3px 8px;
+            border-radius: 4px;
+            color: #10b981;
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔍 Firebase Game Records Checker</h1>
+    <div id="output">
+        <div class="loading">Loading game records from Firebase...</div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyDq_LECOrc4SY90SyDsBQGmwl-YnUNFIj8",
+            authDomain: "xiangqi-sq.firebaseapp.com",
+            projectId: "xiangqi-sq",
+            storageBucket: "xiangqi-sq.firebasestorage.app",
+            messagingSenderId: "351923336298",
+            appId: "1:351923336298:web:e7278ea095ba085ac4935b"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = "sg-xiangqi";
+        const output = document.getElementById('output');
+
+        onAuthStateChanged(auth, async (user) => {
+            if (!user) {
+                output.innerHTML = `<div class="error">❌ Not logged in! Please log in first.</div>`;
+                return;
+            }
+
+            try {
+                output.innerHTML = `
+                    <div class="game-card">
+                        ✅ Logged in as: <code>${user.email}</code><br>
+                        UID: <code>${user.uid}</code>
+                    </div>
+                `;
+
+                // Get game history
+                const historyRef = collection(db, 'artifacts', appId, 'users', user.uid, 'game-history');
+                const historySnap = await getDocs(historyRef);
+
+                output.innerHTML += `
+                    <div class="game-card">
+                        <strong>📊 Found ${historySnap.size} game(s) in Firebase</strong>
+                    </div>
+                `;
+
+                if (historySnap.empty) {
+                    output.innerHTML += `<div class="error">❌ No games found in game-history collection!</div>`;
+                } else {
+                    historySnap.forEach(doc => {
+                        const game = doc.data();
+                        output.innerHTML += `
+                            <div class="game-card">
+                                <strong>Game ID:</strong> <code>${doc.id}</code><br>
+                                <strong>Players:</strong> ${game.playerRed?.playerName} (Red) vs ${game.playerBlack?.playerName} (Black)<br>
+                                <strong>Winner:</strong> ${game.winner}<br>
+                                <strong>Reason:</strong> ${game.reason}<br>
+                                <strong>Moves:</strong> ${game.totalMoves || game.movesICCS?.length || 0}<br>
+                                <strong>Date:</strong> ${new Date(game.completedAt).toLocaleString()}<br>
+                                <strong>ELO Changes:</strong>
+                                Red: ${game.eloChanges?.red?.oldRating} → ${game.eloChanges?.red?.newRating} (${game.eloChanges?.red?.change >= 0 ? '+' : ''}${game.eloChanges?.red?.change}),
+                                Black: ${game.eloChanges?.black?.oldRating} → ${game.eloChanges?.black?.newRating} (${game.eloChanges?.black?.change >= 0 ? '+' : ''}${game.eloChanges?.black?.change})
+                            </div>
+                        `;
+                    });
+                }
+
+                // Get profile data
+                const profileRef = collection(db, 'artifacts', appId, 'users', user.uid, 'profile');
+                const profileSnap = await getDocs(profileRef);
+
+                output.innerHTML += `<div class="game-card"><strong>👤 Profile Data:</strong><br>`;
+
+                if (profileSnap.empty) {
+                    output.innerHTML += `<span style="color:#ef4444;">No profile found!</span>`;
+                } else {
+                    profileSnap.forEach(doc => {
+                        const profile = doc.data();
+                        output.innerHTML += `
+                            Document ID: <code>${doc.id}</code><br>
+                            Player Name: ${profile.playerName || 'N/A'}<br>
+                            ELO: ${profile.elo || 1200}<br>
+                            Games Played: ${profile.gamesPlayed || 0}<br>
+                        `;
+                    });
+                }
+                output.innerHTML += `</div>`;
+
+            } catch (error) {
+                output.innerHTML += `
+                    <div class="error">
+                        ❌ <strong>Error:</strong> ${error.message}<br>
+                        Code: ${error.code}
+                    </div>
+                `;
+                console.error("Check error:", error);
+            }
+        });
+    </script>
+</body>
+</html>

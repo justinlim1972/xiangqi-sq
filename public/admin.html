@@ -1270,46 +1270,18 @@ Instructions: Copy this entire report and paste it into your conversation with C
         container.innerHTML = '<p style="text-align:center; padding:40px; color:#94a3b8;">Loading game records...</p>';
 
         try {
-            console.log('📊 Loading all game records for admin...');
+            console.log('📊 Loading all game records from centralized collection...');
 
-            // Get all users first
-            const usernamesRef = collection(db, 'artifacts', appId, 'public', 'data', 'usernames');
-            const usernamesSnap = await getDocs(usernamesRef);
-
-            console.log(`📋 Found ${usernamesSnap.size} registered users`);
+            // Single query to centralized all-game-history collection (no orderBy to avoid index requirement)
+            const centralRef = collection(db, 'artifacts', appId, 'public', 'data', 'all-game-history');
+            const centralSnap = await getDocs(centralRef);
 
             const allGames = [];
-            let processedUsers = 0;
+            centralSnap.forEach(doc => {
+                allGames.push(doc.data());
+            });
 
-            // For each user, get their game history
-            for (const usernameDoc of usernamesSnap.docs) {
-                const userData = usernameDoc.data();
-                const uid = userData.uid;
-
-                if (!uid) continue;
-
-                try {
-                    const historyRef = collection(db, 'artifacts', appId, 'users', uid, 'game-history');
-                    const historySnap = await getDocs(historyRef);
-
-                    historySnap.forEach(doc => {
-                        const gameData = doc.data();
-                        // Only add unique games (check if gameId already exists)
-                        if (!allGames.find(g => g.gameId === gameData.gameId)) {
-                            allGames.push(gameData);
-                        }
-                    });
-
-                    processedUsers++;
-                    if (processedUsers % 10 === 0) {
-                        console.log(`📥 Processed ${processedUsers}/${usernamesSnap.size} users, found ${allGames.length} games so far...`);
-                    }
-                } catch (err) {
-                    console.log(`⚠️ Cannot read game history for user ${uid}:`, err.message);
-                }
-            }
-
-            console.log(`✅ Loaded ${allGames.length} unique games from ${processedUsers} users`);
+            console.log(`✅ Loaded ${allGames.length} game records from centralized collection`);
 
             // Sort by completion time (newest first)
             allGames.sort((a, b) => b.completedAt - a.completedAt);
@@ -1325,17 +1297,34 @@ Instructions: Copy this entire report and paste it into your conversation with C
                 return;
             }
 
-            // Limit to most recent 100 games for performance
-            const gamesToShow = allGames.slice(0, 100);
-            if (allGames.length > 100) {
-                console.log(`📊 Showing most recent 100 of ${allGames.length} total games`);
+            // Get limit from dropdown or default to 50
+            const limitSelect = document.getElementById('game-limit-select');
+            const gameLimit = limitSelect ? parseInt(limitSelect.value) : 50;
+
+            // Limit to most recent N games for performance
+            const gamesToShow = allGames.slice(0, gameLimit);
+            if (allGames.length > gameLimit) {
+                console.log(`📊 Showing most recent ${gameLimit} of ${allGames.length} total games`);
             }
 
             let html = `
-                <div style="margin-bottom:15px; padding:12px; background:#f1f5f9; border-radius:8px; color:#475569; font-size:0.9rem;">
-                    <strong>📊 Total Games:</strong> ${allGames.length} |
-                    <strong>👥 Players:</strong> ${processedUsers} |
-                    <strong>📄 Showing:</strong> ${gamesToShow.length} most recent
+                <div style="margin-bottom:15px; padding:12px; background:#f1f5f9; border-radius:8px; color:#475569; font-size:0.9rem; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                    <div>
+                        <strong>📊 Total Games:</strong> ${allGames.length} |
+                        <strong>📄 Showing:</strong> ${gamesToShow.length} most recent
+                    </div>
+                    <div style="display:flex; align-items:center; gap:8px;">
+                        <label for="game-limit-select" style="font-weight:600;">Show:</label>
+                        <select id="game-limit-select" onchange="loadGameRecords()" style="padding:6px 12px; border-radius:6px; border:1px solid #cbd5e1; background:white; color:#475569; font-weight:600; cursor:pointer;">
+                            <option value="10" ${gameLimit === 10 ? 'selected' : ''}>10 games</option>
+                            <option value="25" ${gameLimit === 25 ? 'selected' : ''}>25 games</option>
+                            <option value="50" ${gameLimit === 50 ? 'selected' : ''}>50 games</option>
+                            <option value="100" ${gameLimit === 100 ? 'selected' : ''}>100 games</option>
+                            <option value="200" ${gameLimit === 200 ? 'selected' : ''}>200 games</option>
+                            <option value="500" ${gameLimit === 500 ? 'selected' : ''}>500 games</option>
+                            <option value="${allGames.length}" ${gameLimit >= allGames.length ? 'selected' : ''}>All (${allGames.length})</option>
+                        </select>
+                    </div>
                 </div>
                 <div style="display:flex; flex-direction:column; gap:12px;">
             `;
@@ -1345,8 +1334,12 @@ Instructions: Copy this entire report and paste it into your conversation with C
                 // Convert milliseconds to seconds for formatDuration
                 const durationSeconds = Math.floor((game.duration || 0) / 1000);
                 const duration = formatDuration(durationSeconds);
-                const resultText = game.winner === 'draw' ? 'Draw' : `${game.winner.toUpperCase()} wins`;
-                const resultColor = game.winner === 'draw' ? '#64748b' : (game.winner === 'red' ? '#cd3333' : '#000');
+                const resultText = game.winner === 'draw' ? 'Draw' :
+                                  game.winner === 'in-progress' ? 'In Progress' :
+                                  game.winner ? `${game.winner.toUpperCase()} wins` : 'Unknown';
+                const resultColor = game.winner === 'draw' ? '#64748b' :
+                                   game.winner === 'in-progress' ? '#f59e0b' :
+                                   (game.winner === 'red' ? '#cd3333' : '#000');
 
                 html += `
                     <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; padding:20px;">

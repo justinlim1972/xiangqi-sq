@@ -30,7 +30,18 @@
       "Bash(powershell.exe -Command:*)",
       "Bash(ls:*)",
       "Bash(cd \"E:\"\" && powershell -Command \"Compress-Archive -Path 'FireBase-SG' -DestinationPath 'FireBase-SG.zip' -Force \")",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(timeout 3 tail:*)",
+      "Bash(Get-Process)",
+      "Bash(Where-Object {$_ProcessName -like \"*firebase*\" -or $_ProcessName -like \"*node*\"})",
+      "Bash(Select-Object Id, ProcessName, StartTime)",
+      "Bash(Format-Table -AutoSize)",
+      "Bash(ipconfig:*)",
+      "Bash(grep -rn \"btn-engage\\\\|seating-area\" \"E:\\\\FireBase-SG\\\\public\\\\game\"\" --include=\"*.html \")",
+      "Bash(grep:*)",
+      "Bash(E:)",
+      "Bash(npx firebase-admin:*)",
+      "Bash(npm install:*)"
     ]
   }
 }
