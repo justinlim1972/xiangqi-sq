@@ -346,16 +346,20 @@
     <!-- Stats Cards -->
     <div class="stats-grid">
         <div class="stat-card">
+            <div class="stat-label">Current ELO</div>
+            <div class="stat-value" id="stat-elo" style="color: #f59e0b;">-</div>
+        </div>
+        <div class="stat-card">
             <div class="stat-label">Total Games</div>
             <div class="stat-value" id="stat-total">0</div>
         </div>
         <div class="stat-card">
-            <div class="stat-label">Red Wins</div>
-            <div class="stat-value" id="stat-wins" style="color: #cd3333;">0</div>
+            <div class="stat-label">Wins</div>
+            <div class="stat-value" id="stat-wins" style="color: #10b981;">0</div>
         </div>
         <div class="stat-card">
-            <div class="stat-label">Black Wins</div>
-            <div class="stat-value" id="stat-losses" style="color: #000;">0</div>
+            <div class="stat-label">Losses</div>
+            <div class="stat-value" id="stat-losses" style="color: #ef4444;">0</div>
         </div>
         <div class="stat-card">
             <div class="stat-label">Draws</div>
@@ -386,7 +390,7 @@
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
 import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-import { getFirestore, collection, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+import { getFirestore, collection, getDocs, doc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
 class GamesRecordsApp {
     constructor() {
@@ -436,9 +440,9 @@ class GamesRecordsApp {
 
             const myUid = this.user.uid;
             this.allGames = [];
-            centralSnap.forEach(doc => {
-                const game = doc.data();
-                // Only include games where the logged-in player participated
+
+            centralSnap.forEach(d => {
+                const game = d.data();
                 if (game.playerRed?.uid === myUid || game.playerBlack?.uid === myUid) {
                     this.allGames.push(game);
                 }
@@ -449,7 +453,25 @@ class GamesRecordsApp {
 
             console.log(`Loaded ${this.allGames.length} of my games from centralized collection`);
 
-            this.updateStats();
+            // Load current stats from player-stats (single source of truth)
+            const statsRef = doc(this.db, 'artifacts', this.appId, 'player-stats', 'current');
+            onSnapshot(statsRef, (snap) => {
+                if (snap.exists()) {
+                    const allStats = snap.data();
+                    const myStats = allStats[myUid];
+                    if (myStats) {
+                        const provisional = (myStats.gamesPlayed || 0) < 30 ? '?' : '';
+                        document.getElementById('stat-elo').textContent = (myStats.elo || 1200) + provisional;
+                        document.getElementById('stat-total').textContent = myStats.gamesPlayed || 0;
+                        document.getElementById('stat-wins').textContent = myStats.wins || 0;
+                        document.getElementById('stat-losses').textContent = myStats.losses || 0;
+                        document.getElementById('stat-draws').textContent = myStats.draws || 0;
+                    }
+                }
+            });
+
+            this.buildH2HStats();
+            // Stats (ELO, wins, losses, draws) come from player-stats/current via onSnapshot above
             this.renderGames();
 
         } catch (error) {
@@ -464,25 +486,99 @@ class GamesRecordsApp {
         }
     }
 
-    updateStats() {
-        let redWins = 0;
-        let blackWins = 0;
-        let draws = 0;
+    // updateStats() removed — stat cards now populated solely by player-stats/current onSnapshot
+
+    buildH2HStats() {
+        // Build head-to-head stats between every pair of opponents
+        // Key: sorted pair of UIDs, Value: { player1: {uid, name, wins}, player2: {uid, name, wins}, draws }
+        this.h2h = {};
+        const myUid = this.user.uid;
 
         this.allGames.forEach(game => {
-            if (game.winner === 'draw') {
-                draws++;
-            } else if (game.winner === 'red') {
-                redWins++;
+            const redUid = game.playerRed?.uid;
+            const blackUid = game.playerBlack?.uid;
+            if (!redUid || !blackUid) return;
+
+            // Create a consistent key for the pair (sorted UIDs)
+            const pairKey = [redUid, blackUid].sort().join('_vs_');
+
+            if (!this.h2h[pairKey]) {
+                this.h2h[pairKey] = {
+                    players: {},
+                    draws: 0,
+                    total: 0
+                };
+                this.h2h[pairKey].players[redUid] = { name: game.playerRed?.playerName || 'Red', wins: 0 };
+                this.h2h[pairKey].players[blackUid] = { name: game.playerBlack?.playerName || 'Black', wins: 0 };
+            }
+
+            // Update names (use latest)
+            if (game.playerRed?.playerName) this.h2h[pairKey].players[redUid].name = game.playerRed.playerName;
+            if (game.playerBlack?.playerName) this.h2h[pairKey].players[blackUid].name = game.playerBlack.playerName;
+
+            this.h2h[pairKey].total++;
+
+            if (game.winner === 'red') {
+                this.h2h[pairKey].players[redUid].wins++;
             } else if (game.winner === 'black') {
-                blackWins++;
+                this.h2h[pairKey].players[blackUid].wins++;
+            } else {
+                this.h2h[pairKey].draws++;
             }
         });
 
-        document.getElementById('stat-total').textContent = this.allGames.length;
-        document.getElementById('stat-wins').textContent = redWins;
-        document.getElementById('stat-losses').textContent = blackWins;
-        document.getElementById('stat-draws').textContent = draws;
+        console.log('📊 H2H stats built:', Object.keys(this.h2h).length, 'matchups');
+    }
+
+    getH2HDisplay(game) {
+        const redUid = game.playerRed?.uid;
+        const blackUid = game.playerBlack?.uid;
+        if (!redUid || !blackUid) return '';
+
+        const pairKey = [redUid, blackUid].sort().join('_vs_');
+        const h2h = this.h2h[pairKey];
+        if (!h2h || h2h.total < 2) return ''; // Only show if they've played at least 2 games
+
+        const redName = game.playerRed?.playerName || 'Red';
+        const blackName = game.playerBlack?.playerName || 'Black';
+        const redWins = h2h.players[redUid]?.wins || 0;
+        const blackWins = h2h.players[blackUid]?.wins || 0;
+        const draws = h2h.draws;
+
+        // Scoring: Win=2pts, Draw=1pt, Loss=0pt
+        const totalPoints = h2h.total * 2;
+        const redPoints = (redWins * 2) + (draws * 1);
+        const blackPoints = (blackWins * 2) + (draws * 1);
+        const redPct = totalPoints > 0 ? ((redPoints / totalPoints) * 100).toFixed(1) : '0.0';
+        const blackPct = totalPoints > 0 ? ((blackPoints / totalPoints) * 100).toFixed(1) : '0.0';
+
+        // Determine who's leading (by points, not just wins)
+        let redStyle = 'color: #94a3b8;';
+        let blackStyle = 'color: #94a3b8;';
+        if (redPoints > blackPoints) {
+            redStyle = 'color: #10b981; font-weight: 800;';
+        } else if (blackPoints > redPoints) {
+            blackStyle = 'color: #10b981; font-weight: 800;';
+        }
+
+        const barWidth = totalPoints > 0 ? Math.round((redPoints / totalPoints) * 100) : 50;
+
+        return `
+            <div style="margin-top: 6px; padding: 6px 10px; background: rgba(255,255,255,0.03); border-radius: 8px; border: 1px solid rgba(148,163,184,0.1); font-size: 0.75rem;">
+                <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                    <span style="${redStyle}">${redName} ${redWins}W · ${redPct}%</span>
+                    <span style="color: #64748b; font-size: 0.7rem;">${draws}D · ${h2h.total} games</span>
+                    <span style="${blackStyle}">${blackPct}% · ${blackWins}W ${blackName}</span>
+                </div>
+                <div style="margin-top: 4px; height: 4px; background: #1e293b; border-radius: 2px; overflow: hidden; display: flex;">
+                    <div style="width: ${barWidth}%; background: linear-gradient(90deg, #ef4444, #f87171); transition: width 0.3s;"></div>
+                    <div style="width: ${100 - barWidth}%; background: linear-gradient(90deg, #374151, #4b5563);"></div>
+                </div>
+                <div style="margin-top: 3px; text-align: center; color: #64748b; font-size: 0.65rem;">
+                    ${redPoints}/${totalPoints} pts vs ${blackPoints}/${totalPoints} pts (W=2, D=1)
+                </div>
+            </div>
+        `;
     }
 
     filterGames(filter) {
@@ -646,6 +742,8 @@ class GamesRecordsApp {
                 `;
             }
 
+            const h2hDisplay = this.getH2HDisplay(game);
+
             html += `
                 <div class="game-card" onclick="app.viewGame('${game.gameId}')">
                     <div class="game-header">
@@ -665,6 +763,7 @@ class GamesRecordsApp {
                         <div class="game-detail-item">${this.formatReason(game.reason)}</div>
                         ${eloDisplay}
                     </div>
+                    ${h2hDisplay}
                 </div>
             `;
         });

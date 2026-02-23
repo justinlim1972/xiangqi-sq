@@ -119,11 +119,17 @@
 
                         let wins = 0, losses = 0, draws = 0;
                         let lastGameAt = 0;
+                        let latestGameName = '';
 
                         historySnap.forEach(gameDoc => {
                             const game = gameDoc.data();
                             if (game.completedAt > lastGameAt) {
                                 lastGameAt = game.completedAt;
+                                // Extract player's latest name from their most recent game
+                                const isRed = game.playerRed?.uid === uid;
+                                latestGameName = isRed
+                                    ? (game.playerRed?.playerName || game.playerRed?.name || '')
+                                    : (game.playerBlack?.playerName || game.playerBlack?.name || '');
                             }
 
                             if (game.winner === 'draw') {
@@ -143,7 +149,7 @@
 
                         players.push({
                             uid: uid,
-                            playerName: playerName,
+                            playerName: latestGameName || profileData.playerName || playerName,
                             elo: profileData.elo || 1200,
                             gamesPlayed: historySnap.size,
                             wins: wins,

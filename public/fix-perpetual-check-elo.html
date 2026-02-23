@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Fixing ELO...</title>
+    <style>
+        body { font-family: monospace; padding: 20px; background: #1e293b; color: white; max-width: 900px; margin: 0 auto; }
+        h1 { color: #10b981; }
+        .info { color: #3b82f6; background: #1e3a8a; padding: 10px; margin: 5px 0; border-radius: 8px; word-break: break-all; }
+        .success { color: #10b981; background: #064e3b; padding: 10px; margin: 5px 0; border-radius: 8px; font-weight: bold; }
+        .error { color: #ef4444; background: #7f1d1d; padding: 10px; margin: 5px 0; border-radius: 8px; }
+        .warning { color: #f59e0b; background: #78350f; padding: 10px; margin: 5px 0; border-radius: 8px; }
+        .big { font-size: 20px; padding: 20px; margin: 20px 0; }
+    </style>
+</head>
+<body>
+    <h1>🔧 DUMP + FIX ALL Game History</h1>
+    <div id="output"><p class="info">⏳ Waiting for login...</p></div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc, getDocs, collection } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyDq_LECOrc4SY90SyDsBQGmwl-YnUNFIj8",
+            authDomain: "xiangqi-sq.firebaseapp.com",
+            projectId: "xiangqi-sq",
+            storageBucket: "xiangqi-sq.firebasestorage.app",
+            messagingSenderId: "351923336298",
+            appId: "1:351923336298:web:e7278ea095ba085ac4935b"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = "sg-xiangqi";
+
+        const DENG_UID = "OQXCLt4YmlXFoTGLD4MvpRN5utc2";
+        const CHS_UID = "7Ab3sPTyZRNCdkmeYDzOOlq4Tn2";
+        const PRE_CHS_ELO = 1002;
+        const PRE_DENG_ELO = 1178;
+
+        function calcElo(playerRating, opponentRating, gamesPlayed, isRed, result) {
+            const RED_ADV = 25, FLOOR = 400;
+            const k = gamesPlayed < 30 ? 40 : gamesPlayed < 100 ? 32 : 24;
+            const adjP = isRed ? playerRating : playerRating + RED_ADV;
+            const adjO = isRed ? opponentRating + RED_ADV : opponentRating;
+            const expected = 1 / (1 + Math.pow(10, (adjO - adjP) / 400));
+            const actual = result === 'win' ? 1.0 : result === 'loss' ? 0.0 : (isRed ? 0.45 : 0.55);
+            let change = k * (actual - expected);
+            const gap = Math.abs(playerRating - opponentRating);
+            if (gap > 400) {
+                if (playerRating > opponentRating && result === 'win') change = Math.min(change, k * 0.1);
+                else if (playerRating < opponentRating && result === 'loss') change = Math.max(change, -k * 0.1);
+            }
+            return { oldRating: playerRating, newRating: Math.max(FLOOR, Math.round(playerRating + change)), change: Math.max(FLOOR, Math.round(playerRating + change)) - playerRating };
+        }
+
+        function log(msg, type = 'info') {
+            document.getElementById('output').innerHTML += `<p class="${type}">${msg}</p>`;
+        }
+
+        onAuthStateChanged(auth, async (user) => {
+            if (!user) {
+                document.getElementById('output').innerHTML = '<p class="error">❌ Not logged in. Go to <a href="index.html" style="color:#60a5fa">index.html</a> first.</p>';
+                return;
+            }
+
+            document.getElementById('output').innerHTML = '';
+            log(`✅ Logged in as ${user.email}`, 'info');
+
+            try {
+                // STEP 1: DUMP every game record for DENG to find the perpetual check one
+                log('<br><strong>===== DUMPING ALL 大庚剑阵 GAME HISTORY =====</strong>', 'warning');
+                const dengHistCol = collection(db, 'artifacts', appId, 'users', DENG_UID, 'game-history');
+                const dengHistSnap = await getDocs(dengHistCol);
+
+                let perpetualDocId = null;
+                let timeoutDocId = null;
+
+                for (const d of dengHistSnap.docs) {
+                    const data = d.data();
+                    const redName = data.playerRed?.playerName || data.playerRed?.uid || '??';
+                    const blackName = data.playerBlack?.playerName || data.playerBlack?.uid || '??';
+                    const redUid = data.playerRed?.uid || '??';
+                    const blackUid = data.playerBlack?.uid || '??';
+                    const eloR = data.eloChanges?.red ? `${data.eloChanges.red.oldRating}→${data.eloChanges.red.newRating}` : 'none';
+                    const eloB = data.eloChanges?.black ? `${data.eloChanges.black.oldRating}→${data.eloChanges.black.newRating}` : 'none';
+
+                    const involvesCHS = redUid === CHS_UID || blackUid === CHS_UID;
+                    const highlight = involvesCHS ? 'warning' : 'info';
+
+                    log(`<strong>ID: ${d.id}</strong><br>` +
+                        `  Red: ${redName} (${redUid.substring(0,8)}...) | Black: ${blackName} (${blackUid.substring(0,8)}...)<br>` +
+                        `  Winner: ${data.winner} | Reason: ${data.reason} | Status: ${data.status}<br>` +
+                        `  ELO Red: ${eloR} | ELO Black: ${eloB}<br>` +
+                        `  Moves: ${data.totalMoves} | Date: ${data.completedAt ? new Date(data.completedAt).toLocaleString() : '??'}`,
+                        highlight);
+
+                    // Identify the perpetual check game
+                    if (involvesCHS && (
+                        (data.reason || '').includes('perpetual') ||
+                        (data.status || '').includes('perpetual') ||
+                        (data.eloChanges?.red?.oldRating === 1002 && data.eloChanges?.red?.newRating === 1026)
+                    )) {
+                        perpetualDocId = d.id;
+                        log(`  ^^^ THIS IS THE PERPETUAL CHECK GAME ^^^`, 'error');
+                    }
+
+                    // Identify the timeout game
+                    if (involvesCHS && redUid === DENG_UID && data.winner === 'red' &&
+                        ((data.reason || '').includes('timeout'))) {
+                        timeoutDocId = d.id;
+                        log(`  ^^^ THIS IS THE TIMEOUT GAME ^^^`, 'error');
+                    }
+                }
+
+                // STEP 2: Also dump CHS history
+                log('<br><strong>===== DUMPING ALL CHSprimary GAME HISTORY =====</strong>', 'warning');
+                const chsHistCol = collection(db, 'artifacts', appId, 'users', CHS_UID, 'game-history');
+                const chsHistSnap = await getDocs(chsHistCol);
+
+                let chsPerpetualDocId = null;
+                let chsTimeoutDocId = null;
+
+                for (const d of chsHistSnap.docs) {
+                    const data = d.data();
+                    const redName = data.playerRed?.playerName || data.playerRed?.uid || '??';
+                    const blackName = data.playerBlack?.playerName || data.playerBlack?.uid || '??';
+                    const redUid = data.playerRed?.uid || '??';
+                    const blackUid = data.playerBlack?.uid || '??';
+                    const eloR = data.eloChanges?.red ? `${data.eloChanges.red.oldRating}→${data.eloChanges.red.newRating}` : 'none';
+                    const eloB = data.eloChanges?.black ? `${data.eloChanges.black.oldRating}→${data.eloChanges.black.newRating}` : 'none';
+
+                    const involvesDENG = redUid === DENG_UID || blackUid === DENG_UID;
+                    const highlight = involvesDENG ? 'warning' : 'info';
+
+                    log(`<strong>ID: ${d.id}</strong><br>` +
+                        `  Red: ${redName} (${redUid.substring(0,8)}...) | Black: ${blackName} (${blackUid.substring(0,8)}...)<br>` +
+                        `  Winner: ${data.winner} | Reason: ${data.reason} | Status: ${data.status}<br>` +
+                        `  ELO Red: ${eloR} | ELO Black: ${eloB}<br>` +
+                        `  Moves: ${data.totalMoves} | Date: ${data.completedAt ? new Date(data.completedAt).toLocaleString() : '??'}`,
+                        highlight);
+
+                    if (involvesDENG && (
+                        (data.reason || '').includes('perpetual') ||
+                        (data.status || '').includes('perpetual') ||
+                        (data.eloChanges?.red?.oldRating === 1002 && data.eloChanges?.red?.newRating === 1026)
+                    )) {
+                        chsPerpetualDocId = d.id;
+                        log(`  ^^^ THIS IS THE PERPETUAL CHECK GAME ^^^`, 'error');
+                    }
+
+                    if (involvesDENG && redUid === DENG_UID && data.winner === 'red' &&
+                        ((data.reason || '').includes('timeout'))) {
+                        chsTimeoutDocId = d.id;
+                        log(`  ^^^ THIS IS THE TIMEOUT GAME ^^^`, 'error');
+                    }
+                }
+
+                // STEP 3: Now calculate correct ELOs
+                log('<br><strong>===== CALCULATING CORRECT ELOS =====</strong>', 'warning');
+
+                // Read current profiles for gamesPlayed
+                const dengSnap = await getDoc(doc(db, 'artifacts', appId, 'users', DENG_UID, 'profile', 'data'));
+                const chsSnap = await getDoc(doc(db, 'artifacts', appId, 'users', CHS_UID, 'profile', 'data'));
+                const dengP = dengSnap.exists() ? dengSnap.data() : {};
+                const chsP = chsSnap.exists() ? chsSnap.data() : {};
+                const dengGames = dengP.gamesPlayed || 2;
+                const chsGames = chsP.gamesPlayed || 2;
+
+                log(`Current profiles: DENG elo=${dengP.elo} games=${dengGames} | CHS elo=${chsP.elo} games=${chsGames}`, 'info');
+
+                const g2Red = calcElo(PRE_CHS_ELO, PRE_DENG_ELO, chsGames - 2, true, 'loss');
+                const g2Black = calcElo(PRE_DENG_ELO, PRE_CHS_ELO, dengGames - 2, false, 'win');
+                log(`Game #2 correct: CHS ${PRE_CHS_ELO}→${g2Red.newRating} (${g2Red.change}), DENG ${PRE_DENG_ELO}→${g2Black.newRating} (${g2Black.change})`, 'success');
+
+                const g1Red = calcElo(g2Black.newRating, g2Red.newRating, dengGames - 1, true, 'win');
+                const g1Black = calcElo(g2Red.newRating, g2Black.newRating, chsGames - 1, false, 'loss');
+                log(`Game #1 correct: DENG ${g2Black.newRating}→${g1Red.newRating} (${g1Red.change}), CHS ${g2Red.newRating}→${g1Black.newRating} (${g1Black.change})`, 'success');
+
+                // STEP 4: FIX EVERY game record between these two players - BRUTE FORCE
+                log('<br><strong>===== FIXING ALL RECORDS (BRUTE FORCE) =====</strong>', 'warning');
+                let fixCount = 0;
+
+                // Fix DENG's history
+                for (const d of dengHistSnap.docs) {
+                    const data = d.data();
+                    const redUid = data.playerRed?.uid || '';
+                    const blackUid = data.playerBlack?.uid || '';
+
+                    // Perpetual check game: CHS=Red, DENG=Black
+                    if (redUid === CHS_UID && blackUid === DENG_UID && data.totalMoves > 50) {
+                        // This must be the 104-move perpetual check game
+                        try {
+                            await setDoc(d.ref, {
+                                winner: 'black',
+                                reason: 'perpetual-check-corrected',
+                                correctionNote: 'Perpetual check bug: captures should reset count. Black won.',
+                                eloChanges: {
+                                    red: { oldRating: PRE_CHS_ELO, newRating: g2Red.newRating, change: g2Red.change },
+                                    black: { oldRating: PRE_DENG_ELO, newRating: g2Black.newRating, change: g2Black.change }
+                                }
+                            }, { merge: true });
+                            log(`✅ FIXED DENG perpetual record: ${d.id} → winner=black, ELO corrected`, 'success');
+                            fixCount++;
+                        } catch(e) { log(`⚠️ ${d.id}: ${e.message}`, 'warning'); }
+                    }
+
+                    // Timeout game: DENG=Red, CHS=Black, DENG won
+                    if (redUid === DENG_UID && blackUid === CHS_UID && data.winner === 'red' && data.totalMoves < 60) {
+                        try {
+                            await setDoc(d.ref, {
+                                correctionNote: 'ELO recalculated after perpetual check fix.',
+                                eloChanges: {
+                                    red: { oldRating: g2Black.newRating, newRating: g1Red.newRating, change: g1Red.change },
+                                    black: { oldRating: g2Red.newRating, newRating: g1Black.newRating, change: g1Black.change }
+                                }
+                            }, { merge: true });
+                            log(`✅ FIXED DENG timeout record: ${d.id} → ELO corrected`, 'success');
+                            fixCount++;
+                        } catch(e) { log(`⚠️ ${d.id}: ${e.message}`, 'warning'); }
+                    }
+                }
+
+                // Fix CHS's history
+                for (const d of chsHistSnap.docs) {
+                    const data = d.data();
+                    const redUid = data.playerRed?.uid || '';
+                    const blackUid = data.playerBlack?.uid || '';
+
+                    // Perpetual check game: CHS=Red, DENG=Black
+                    if (redUid === CHS_UID && blackUid === DENG_UID && data.totalMoves > 50) {
+                        try {
+                            await setDoc(d.ref, {
+                                winner: 'black',
+                                reason: 'perpetual-check-corrected',
+                                correctionNote: 'Perpetual check bug: captures should reset count. Black won.',
+                                eloChanges: {
+                                    red: { oldRating: PRE_CHS_ELO, newRating: g2Red.newRating, change: g2Red.change },
+                                    black: { oldRating: PRE_DENG_ELO, newRating: g2Black.newRating, change: g2Black.change }
+                                }
+                            }, { merge: true });
+                            log(`✅ FIXED CHS perpetual record: ${d.id} → winner=black, ELO corrected`, 'success');
+                            fixCount++;
+                        } catch(e) { log(`⚠️ ${d.id}: ${e.message}`, 'warning'); }
+                    }
+
+                    // Timeout game: DENG=Red, CHS=Black, DENG won
+                    if (redUid === DENG_UID && blackUid === CHS_UID && data.winner === 'red' && data.totalMoves < 60) {
+                        try {
+                            await setDoc(d.ref, {
+                                correctionNote: 'ELO recalculated after perpetual check fix.',
+                                eloChanges: {
+                                    red: { oldRating: g2Black.newRating, newRating: g1Red.newRating, change: g1Red.change },
+                                    black: { oldRating: g2Red.newRating, newRating: g1Black.newRating, change: g1Black.change }
+                                }
+                            }, { merge: true });
+                            log(`✅ FIXED CHS timeout record: ${d.id} → ELO corrected`, 'success');
+                            fixCount++;
+                        } catch(e) { log(`⚠️ ${d.id}: ${e.message}`, 'warning'); }
+                    }
+                }
+
+                // Fix centralized history
+                log('<br>💾 Fixing centralized history...', 'info');
+                try {
+                    const centralCol = collection(db, 'artifacts', appId, 'public', 'data', 'all-game-history');
+                    const centralSnap = await getDocs(centralCol);
+                    for (const d of centralSnap.docs) {
+                        const data = d.data();
+                        const redUid = data.playerRed?.uid || '';
+                        const blackUid = data.playerBlack?.uid || '';
+
+                        if (redUid === CHS_UID && blackUid === DENG_UID && data.totalMoves > 50) {
+                            try {
+                                await setDoc(d.ref, {
+                                    winner: 'black',
+                                    reason: 'perpetual-check-corrected',
+                                    eloChanges: {
+                                        red: { oldRating: PRE_CHS_ELO, newRating: g2Red.newRating, change: g2Red.change },
+                                        black: { oldRating: PRE_DENG_ELO, newRating: g2Black.newRating, change: g2Black.change }
+                                    }
+                                }, { merge: true });
+                                log(`✅ FIXED central perpetual: ${d.id}`, 'success');
+                                fixCount++;
+                            } catch(e) { log(`⚠️ ${e.message}`, 'warning'); }
+                        }
+
+                        if (redUid === DENG_UID && blackUid === CHS_UID && data.winner === 'red' && data.totalMoves < 60) {
+                            try {
+                                await setDoc(d.ref, {
+                                    eloChanges: {
+                                        red: { oldRating: g2Black.newRating, newRating: g1Red.newRating, change: g1Red.change },
+                                        black: { oldRating: g2Red.newRating, newRating: g1Black.newRating, change: g1Black.change }
+                                    }
+                                }, { merge: true });
+                                log(`✅ FIXED central timeout: ${d.id}`, 'success');
+                                fixCount++;
+                            } catch(e) { log(`⚠️ ${e.message}`, 'warning'); }
+                        }
+                    }
+                } catch(e) { log(`⚠️ Central: ${e.message}`, 'warning'); }
+
+                // DONE
+                log(`<p class="success big">🎉 DONE! Fixed ${fixCount} records total.<br>Profiles already correct: DENG=${dengP.elo}, CHS=${chsP.elo}</p>`, 'success');
+
+            } catch (error) {
+                log(`❌ FATAL: ${error.message}`, 'error');
+                log(`${error.stack}`, 'error');
+            }
+        });
+    </script>
+</body>
+</html>

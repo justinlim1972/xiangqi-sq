@@ -342,6 +342,11 @@ export class XQEngine {
         for (let i = moveHistory.length - 1; i >= 0 && consecutiveChecks < 7; i--) {
             const move = moveHistory[i];
 
+            // A capture resets the perpetual check count (standard Xiangqi rule)
+            if (move.isCapture) {
+                break;
+            }
+
             if (move.isCheck) {
                 // First check we encounter
                 if (checkingPlayer === null) {
@@ -389,6 +394,11 @@ export class XQEngine {
         // Scan backwards through recent moves
         for (let i = moveHistory.length - 1; i >= 0; i--) {
             const move = moveHistory[i];
+
+            // A capture resets the perpetual check count (standard Xiangqi rule)
+            if (move.isCapture) {
+                break;
+            }
 
             if (move.isCheck) {
                 if (checkingPlayer === null) {

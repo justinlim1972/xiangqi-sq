@@ -355,7 +355,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, doc, getDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { eloSystem } from './elo-system.js';
 
         const firebaseConfig = {
@@ -388,61 +388,79 @@
                 });
             }
 
-            async loadRankings() {
-                try {
-                    console.log('📊 Loading player rankings from centralized leaderboard...');
+            loadRankings() {
+                console.log('📊 Subscribing to real-time player rankings from player-stats...');
 
-                    // Read from centralized leaderboard
-                    const leaderboardRef = doc(db, 'artifacts', appId, 'leaderboard', 'rankings');
-                    const leaderboardSnap = await getDoc(leaderboardRef);
+                // Read from player-stats single document (source of truth)
+                const statsRef = doc(db, 'artifacts', appId, 'player-stats', 'current');
 
-                    if (!leaderboardSnap.exists()) {
-                        console.warn('⚠️ Leaderboard not found. Please run build-leaderboard.html first.');
+                this.unsubscribe = onSnapshot(statsRef, (statsSnap) => {
+                    try {
+                        if (!statsSnap.exists()) {
+                            console.warn('⚠️ player-stats not found. Visit lobby to build it.');
+                            document.getElementById('ranking-body').innerHTML = `
+                                <div class="empty-state">
+                                    <div class="empty-state-icon">📊</div>
+                                    <h3>Rankings Not Built</h3>
+                                    <p>Visit the lobby first to initialize player stats.</p>
+                                    <a href="../../lobby/lobby.html" class="btn-back" style="display:inline-block;margin-top:15px;">Go to Lobby</a>
+                                </div>
+                            `;
+                            return;
+                        }
+
+                        const allStats = statsSnap.data();
+                        const updatedAt = allStats._updatedAt || 0;
+
+                        // Convert map to array
+                        const players = [];
+                        for (const [uid, data] of Object.entries(allStats)) {
+                            if (uid.startsWith('_')) continue; // skip metadata keys
+                            players.push({ uid, ...data });
+                        }
+
+                        console.log(`✅ Loaded ${players.length} players from player-stats`);
+                        console.log(`📅 Last updated: ${new Date(updatedAt).toLocaleString()}`);
+
+                        // Transform and sort by ELO
+                        this.players = players.map(player => {
+                            const totalGames = player.gamesPlayed || 0;
+                            const winRate = totalGames > 0 ? (player.wins / totalGames * 100) : 0;
+
+                            return {
+                                uid: player.uid,
+                                playerName: player.playerName || 'Unknown',
+                                elo: player.elo || 1200,
+                                gamesPlayed: totalGames,
+                                wins: player.wins || 0,
+                                losses: player.losses || 0,
+                                draws: player.draws || 0,
+                                winRate: winRate,
+                                provisional: totalGames < 30
+                            };
+                        });
+
+                        // Sort by ELO descending, take top 100
+                        this.players.sort((a, b) => b.elo - a.elo);
+                        this.players = this.players.slice(0, 100);
+
+                        console.log('📋 Sample player data:', this.players.slice(0, 3));
+
+                        this.updateStats();
+                        this.renderRankings();
+
+                    } catch (error) {
+                        console.error('❌ Error processing rankings:', error);
                         document.getElementById('ranking-body').innerHTML = `
                             <div class="empty-state">
-                                <div class="empty-state-icon">📊</div>
-                                <h3>Leaderboard Not Built</h3>
-                                <p>Please run the leaderboard builder first.</p>
-                                <a href="../../build-leaderboard.html" class="btn-back" style="display:inline-block;margin-top:15px;">Build Leaderboard</a>
+                                <div class="empty-state-icon">❌</div>
+                                <h3>Error Loading Rankings</h3>
+                                <p>${error.message}</p>
                             </div>
                         `;
-                        return;
                     }
-
-                    const leaderboardData = leaderboardSnap.data();
-                    const players = leaderboardData.players || [];
-
-                    console.log(`✅ Loaded ${players.length} players from centralized leaderboard`);
-                    console.log(`📅 Last updated: ${new Date(leaderboardData.updatedAt).toLocaleString()}`);
-
-                    // Transform data to match expected format and calculate provisional status
-                    this.players = players.map(player => {
-                        const totalGames = player.gamesPlayed || 0;
-                        const winRate = totalGames > 0 ? (player.wins / totalGames * 100) : 0;
-
-                        return {
-                            uid: player.uid,
-                            playerName: player.playerName || 'Unknown',
-                            elo: player.elo || 1200,
-                            gamesPlayed: totalGames,
-                            wins: player.wins || 0,
-                            losses: player.losses || 0,
-                            draws: player.draws || 0,
-                            winRate: winRate,
-                            provisional: totalGames < 30
-                        };
-                    });
-
-                    // Already sorted by ELO from leaderboard builder, take top 100
-                    this.players = this.players.slice(0, 100);
-
-                    console.log('📋 Sample player data:', this.players.slice(0, 3));
-
-                    this.updateStats();
-                    this.renderRankings();
-
-                } catch (error) {
-                    console.error('❌ Error loading rankings:', error);
+                }, (error) => {
+                    console.error('❌ Error subscribing to rankings:', error);
                     document.getElementById('ranking-body').innerHTML = `
                         <div class="empty-state">
                             <div class="empty-state-icon">❌</div>
@@ -450,7 +468,7 @@
                             <p>${error.message}</p>
                         </div>
                     `;
-                }
+                });
             }
 
             updateStats() {

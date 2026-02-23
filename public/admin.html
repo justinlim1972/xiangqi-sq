@@ -82,6 +82,7 @@
         <button class="btn" style="background:#10b981; color:white; font-weight:900;" onclick="toggleUserManagement()">👥 User Management</button>
         <button class="btn" style="background:#ef4444; color:white; font-weight:900;" onclick="toggleBugReports()">🐛 Bug Reports</button>
         <button class="btn" style="background:#3b82f6; color:white; font-weight:900;" onclick="toggleGameRecords()">📜 Game Records</button>
+        <button class="btn" style="background:#8b5cf6; color:white; font-weight:900;" onclick="togglePlayerStats()">📊 Player Stats</button>
         <button class="btn" style="background:rgba(255,255,255,0.2); color:white;" onclick="window.location.href=window.location.origin + '/lobby/lobby.html'">Exit to Lobby</button>
     </div>
 </header>
@@ -148,10 +149,155 @@
     <div id="game-records-section" class="card full-width" style="display:none;">
         <h2>
             📜 Game Records (All Players)
-            <button class="btn btn-sm" style="background:#64748b; color:white;" onclick="toggleGameRecords()">Back to Region Management</button>
+            <div style="display:flex; gap:8px;">
+                <button class="btn btn-sm" style="background:#ef4444; color:white; font-weight:900;" onclick="fixPerpetualCheckGame()">🔧 Fix Perpetual Check Game</button>
+                <button class="btn btn-sm" style="background:#64748b; color:white;" onclick="toggleGameRecords()">Back to Region Management</button>
+            </div>
         </h2>
         <div id="game-records-container" style="margin-top:20px;">
             <p style="text-align:center; padding:40px; color:#94a3b8;">Loading game records...</p>
+        </div>
+    </div>
+
+    <!-- PLAYER STATS SECTION (Hidden by default) -->
+    <div id="player-stats-section" class="card full-width" style="display:none;">
+        <h2>
+            📊 Player Stats (Source of Truth)
+            <div style="display:flex; gap:8px;">
+                <button class="btn btn-sm" style="background:#f59e0b; color:white;" onclick="buildPlayerStats()">🔨 Build Stats</button>
+                <button class="btn btn-sm" style="background:#8b5cf6; color:white;" onclick="refreshPlayerStats()">🔄 Refresh</button>
+                <button class="btn btn-sm" style="background:#64748b; color:white;" onclick="togglePlayerStats()">Back to Region Management</button>
+            </div>
+        </h2>
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px;">
+            <div style="background: #f5f3ff; padding: 15px; border-radius: 10px; border-left: 4px solid #8b5cf6;">
+                <div style="font-size: 0.75rem; color: #5b21b6; font-weight: 700; text-transform: uppercase;">Total Players</div>
+                <div id="stats-total-players" style="font-size: 1.8rem; font-weight: 900; color: #4c1d95; margin-top: 5px;">-</div>
+            </div>
+            <div style="background: #f0fdf4; padding: 15px; border-radius: 10px; border-left: 4px solid #10b981;">
+                <div style="font-size: 0.75rem; color: #166534; font-weight: 700; text-transform: uppercase;">Total Games</div>
+                <div id="stats-total-games" style="font-size: 1.8rem; font-weight: 900; color: #064e3b; margin-top: 5px;">-</div>
+            </div>
+            <div style="background: #fef3c7; padding: 15px; border-radius: 10px; border-left: 4px solid #f59e0b;">
+                <div style="font-size: 0.75rem; color: #92400e; font-weight: 700; text-transform: uppercase;">Highest ELO</div>
+                <div id="stats-highest-elo" style="font-size: 1.8rem; font-weight: 900; color: #78350f; margin-top: 5px;">-</div>
+            </div>
+            <div style="background: #eff6ff; padding: 15px; border-radius: 10px; border-left: 4px solid #3b82f6;">
+                <div style="font-size: 0.75rem; color: #1e40af; font-weight: 700; text-transform: uppercase;">Last Updated</div>
+                <div id="stats-last-updated" style="font-size: 1.2rem; font-weight: 900; color: #1e3a8a; margin-top: 5px;">-</div>
+            </div>
+        </div>
+        <table class="user-table" id="player-stats-table">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Player Name</th>
+                    <th>UID</th>
+                    <th>ELO</th>
+                    <th>Games</th>
+                    <th>Wins</th>
+                    <th>Losses</th>
+                    <th>Draws</th>
+                    <th>Win Rate</th>
+                    <th>Last Game</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="player-stats-body">
+                <tr><td colspan="11" style="text-align:center; padding:40px; color:#94a3b8;">Loading player stats...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Edit Player Stats Modal -->
+    <div id="edit-stats-modal" class="modal">
+        <div class="modal-content" style="width:500px;">
+            <h3 style="margin-top:0; margin-bottom:20px;">Edit Player Stats</h3>
+            <input type="hidden" id="edit-stats-uid">
+            <div class="form-group">
+                <label>Player Name</label>
+                <input type="text" id="edit-stats-name" readonly style="background:#f1f5f9;">
+            </div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                <div class="form-group">
+                    <label>ELO Rating</label>
+                    <input type="number" id="edit-stats-elo">
+                </div>
+                <div class="form-group">
+                    <label>Games Played</label>
+                    <input type="number" id="edit-stats-games">
+                </div>
+                <div class="form-group">
+                    <label>Wins</label>
+                    <input type="number" id="edit-stats-wins">
+                </div>
+                <div class="form-group">
+                    <label>Losses</label>
+                    <input type="number" id="edit-stats-losses">
+                </div>
+                <div class="form-group">
+                    <label>Draws</label>
+                    <input type="number" id="edit-stats-draws">
+                </div>
+            </div>
+            <div style="display:flex; gap:10px; margin-top:20px;">
+                <button class="btn btn-success" style="flex:1; font-size:1rem; padding:12px;" onclick="savePlayerStats()">Save Changes</button>
+                <button class="btn btn-danger" style="font-size:1rem; padding:12px;" onclick="closeModals()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Game Record Modal -->
+    <div id="edit-game-modal" class="modal">
+        <div class="modal-content" style="width:550px;">
+            <h3 style="margin-top:0; margin-bottom:20px;">Edit Game Record</h3>
+            <input type="hidden" id="edit-game-docid">
+            <input type="hidden" id="edit-game-red-uid">
+            <input type="hidden" id="edit-game-black-uid">
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:15px;">
+                <div class="form-group">
+                    <label>Red Player</label>
+                    <input type="text" id="edit-game-red-name" readonly style="background:#f1f5f9;">
+                </div>
+                <div class="form-group">
+                    <label>Black Player</label>
+                    <input type="text" id="edit-game-black-name" readonly style="background:#f1f5f9;">
+                </div>
+            </div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+                <div class="form-group">
+                    <label>Winner</label>
+                    <select id="edit-game-winner" style="width:100%; padding:10px; border:1px solid #ddd; border-radius:8px;">
+                        <option value="red">Red</option>
+                        <option value="black">Black</option>
+                        <option value="draw">Draw</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Reason</label>
+                    <input type="text" id="edit-game-reason">
+                </div>
+            </div>
+            <div style="margin-top:15px; padding:12px; background:#fef2f2; border-radius:8px; border:1px solid #fecaca;">
+                <label style="color:#cd3333; font-size:0.85rem;">RED ELO Changes</label>
+                <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-top:5px;">
+                    <div class="form-group" style="margin:0;"><label>Old Rating</label><input type="number" id="edit-game-red-old"></div>
+                    <div class="form-group" style="margin:0;"><label>New Rating</label><input type="number" id="edit-game-red-new"></div>
+                    <div class="form-group" style="margin:0;"><label>Change</label><input type="number" id="edit-game-red-change"></div>
+                </div>
+            </div>
+            <div style="margin-top:10px; padding:12px; background:#f1f5f9; border-radius:8px; border:1px solid #e2e8f0;">
+                <label style="color:#000; font-size:0.85rem;">BLACK ELO Changes</label>
+                <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-top:5px;">
+                    <div class="form-group" style="margin:0;"><label>Old Rating</label><input type="number" id="edit-game-black-old"></div>
+                    <div class="form-group" style="margin:0;"><label>New Rating</label><input type="number" id="edit-game-black-new"></div>
+                    <div class="form-group" style="margin:0;"><label>Change</label><input type="number" id="edit-game-black-change"></div>
+                </div>
+            </div>
+            <div style="display:flex; gap:10px; margin-top:20px;">
+                <button class="btn btn-success" style="flex:1; font-size:1rem; padding:12px;" onclick="saveGameRecord()">Save Changes</button>
+                <button class="btn btn-danger" style="font-size:1rem; padding:12px;" onclick="closeModals()">Cancel</button>
+            </div>
         </div>
     </div>
 
@@ -289,7 +435,7 @@
 <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
     import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-    import { getFirestore, collection, doc, onSnapshot, query, orderBy, setDoc, addDoc, updateDoc, deleteDoc, serverTimestamp, deleteField, getDocs, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+    import { getFirestore, collection, doc, onSnapshot, query, orderBy, setDoc, addDoc, updateDoc, deleteDoc, serverTimestamp, deleteField, getDocs, getDoc, getDocFromServer } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
     const firebaseConfig = { apiKey: "AIzaSyDq_LECOrc4SY90SyDsBQGmwl-YnUNFIj8", authDomain: "xiangqi-sq.firebaseapp.com", projectId: "xiangqi-sq", storageBucket: "xiangqi-sq.firebasestorage.app", messagingSenderId: "351923336298", appId: "1:351923336298:web:e7278ea095ba085ac4935b" };
     const app = initializeApp(firebaseConfig);
@@ -299,6 +445,7 @@
 
     let activeRegionId = null;
     let tablesUnsubscribe = null;
+    let playerStatsUnsubscribe = null;
 
     onAuthStateChanged(auth, async (user) => {
         if (!user) { window.location.href = window.location.origin + '/index.html'; return; }
@@ -793,10 +940,14 @@
         const tablesColumn = document.getElementById('tables-column');
 
         if (userSection.style.display === 'none') {
-            // Show user management
+            // Show user management, hide everything else
             userSection.style.display = 'block';
             regionColumn.style.display = 'none';
             tablesColumn.style.display = 'none';
+            document.getElementById('bug-reports-section').style.display = 'none';
+            document.getElementById('game-records-section').style.display = 'none';
+            document.getElementById('player-stats-section').style.display = 'none';
+            if (playerStatsUnsubscribe) { playerStatsUnsubscribe(); playerStatsUnsubscribe = null; }
             loadUserManagement();
         } else {
             // Hide user management
@@ -1104,11 +1255,14 @@
         const tablesColumn = document.getElementById('tables-column');
 
         if (bugSection.style.display === 'none') {
-            // Show bug reports
+            // Show bug reports, hide everything else
             bugSection.style.display = 'block';
             userSection.style.display = 'none';
             regionColumn.style.display = 'none';
             tablesColumn.style.display = 'none';
+            document.getElementById('game-records-section').style.display = 'none';
+            document.getElementById('player-stats-section').style.display = 'none';
+            if (playerStatsUnsubscribe) { playerStatsUnsubscribe(); playerStatsUnsubscribe = null; }
             loadBugReports();
         } else {
             // Hide bug reports
@@ -1250,12 +1404,14 @@ Instructions: Copy this entire report and paste it into your conversation with C
         const tablesColumn = document.getElementById('tables-column');
 
         if (gameRecordsSection.style.display === 'none') {
-            // Show game records
+            // Show game records, hide everything else
             gameRecordsSection.style.display = 'block';
             userSection.style.display = 'none';
             bugSection.style.display = 'none';
             regionColumn.style.display = 'none';
             tablesColumn.style.display = 'none';
+            document.getElementById('player-stats-section').style.display = 'none';
+            if (playerStatsUnsubscribe) { playerStatsUnsubscribe(); playerStatsUnsubscribe = null; }
             loadGameRecords();
         } else {
             // Hide game records
@@ -1277,8 +1433,8 @@ Instructions: Copy this entire report and paste it into your conversation with C
             const centralSnap = await getDocs(centralRef);
 
             const allGames = [];
-            centralSnap.forEach(doc => {
-                allGames.push(doc.data());
+            centralSnap.forEach(d => {
+                allGames.push({ _docId: d.id, ...d.data() });
             });
 
             console.log(`✅ Loaded ${allGames.length} game records from centralized collection`);
@@ -1381,9 +1537,10 @@ Instructions: Copy this entire report and paste it into your conversation with C
                             </span>
                         </div>
                         ` : ''}
-                        <button class="btn btn-sm" style="background:#3b82f6; color:white;" onclick="viewGameAsAdmin('${game.gameId}', '${game.playerRed?.uid}')">
-                            👁️ View Replay
-                        </button>
+                        <div style="display:flex; gap:8px;">
+                            <button class="btn btn-sm" style="background:#3b82f6; color:white;" onclick="viewGameAsAdmin('${game.gameId}', '${game.playerRed?.uid}')">👁️ View Replay</button>
+                            <button class="btn btn-sm" style="background:#8b5cf6; color:white;" onclick="editGameRecord('${game._docId}')">✏️ Edit</button>
+                        </div>
                     </div>
                 `;
             });
@@ -1419,6 +1576,435 @@ Instructions: Copy this entire report and paste it into your conversation with C
     window.viewGameAsAdmin = (gameId, userId) => {
         // Admin views game from the player's history
         window.open(`/game/game_preview.html?id=${gameId}&uid=${userId}`, '_blank');
+    };
+
+    // === EDIT GAME RECORD ===
+    window.editGameRecord = async (docId) => {
+        try {
+            const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'all-game-history', docId);
+            const snap = await getDocFromServer(docRef);
+            if (!snap.exists()) { alert('Game record not found: ' + docId); return; }
+
+            const game = snap.data();
+            document.getElementById('edit-game-docid').value = docId;
+            document.getElementById('edit-game-red-uid').value = game.playerRed?.uid || '';
+            document.getElementById('edit-game-black-uid').value = game.playerBlack?.uid || '';
+            document.getElementById('edit-game-red-name').value = game.playerRed?.playerName || 'Red';
+            document.getElementById('edit-game-black-name').value = game.playerBlack?.playerName || 'Black';
+            document.getElementById('edit-game-winner').value = game.winner || 'red';
+            document.getElementById('edit-game-reason').value = game.reason || '';
+            document.getElementById('edit-game-red-old').value = game.eloChanges?.red?.oldRating || 1200;
+            document.getElementById('edit-game-red-new').value = game.eloChanges?.red?.newRating || 1200;
+            document.getElementById('edit-game-red-change').value = game.eloChanges?.red?.change || 0;
+            document.getElementById('edit-game-black-old').value = game.eloChanges?.black?.oldRating || 1200;
+            document.getElementById('edit-game-black-new').value = game.eloChanges?.black?.newRating || 1200;
+            document.getElementById('edit-game-black-change').value = game.eloChanges?.black?.change || 0;
+
+            document.getElementById('edit-game-modal').style.display = 'flex';
+        } catch (e) {
+            alert('Error loading game record: ' + e.message);
+        }
+    };
+
+    window.saveGameRecord = async () => {
+        const docId = document.getElementById('edit-game-docid').value;
+        if (!docId) return;
+
+        const winner = document.getElementById('edit-game-winner').value;
+        const reason = document.getElementById('edit-game-reason').value;
+        const eloChanges = {
+            red: {
+                oldRating: parseInt(document.getElementById('edit-game-red-old').value),
+                newRating: parseInt(document.getElementById('edit-game-red-new').value),
+                change: parseInt(document.getElementById('edit-game-red-change').value)
+            },
+            black: {
+                oldRating: parseInt(document.getElementById('edit-game-black-old').value),
+                newRating: parseInt(document.getElementById('edit-game-black-new').value),
+                change: parseInt(document.getElementById('edit-game-black-change').value)
+            }
+        };
+
+        if (!confirm(`Update game record?\n\nWinner: ${winner}\nReason: ${reason}\nRed: ${eloChanges.red.oldRating}→${eloChanges.red.newRating} (${eloChanges.red.change})\nBlack: ${eloChanges.black.oldRating}→${eloChanges.black.newRating} (${eloChanges.black.change})`)) return;
+
+        try {
+            // Update centralized all-game-history
+            const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'all-game-history', docId);
+            await updateDoc(docRef, { winner, reason, eloChanges });
+            console.log('✅ Updated all-game-history:', docId);
+
+            // Also update per-user game-history copies
+            const redUid = document.getElementById('edit-game-red-uid').value;
+            const blackUid = document.getElementById('edit-game-black-uid').value;
+
+            for (const uid of [redUid, blackUid]) {
+                if (!uid) continue;
+                try {
+                    const histCol = collection(db, 'artifacts', appId, 'users', uid, 'game-history');
+                    const histSnap = await getDocs(histCol);
+                    for (const d of histSnap.docs) {
+                        if (d.id === docId || d.data().gameId === docId.split('_').slice(0, -1).join('_')) {
+                            await updateDoc(d.ref, { winner, reason, eloChanges });
+                            console.log('✅ Updated per-user history for', uid);
+                            break;
+                        }
+                    }
+                } catch (e) { console.warn('Per-user update error:', e); }
+            }
+
+            alert('Game record updated successfully!');
+            closeModals();
+            loadGameRecords(); // Refresh the list
+        } catch (e) {
+            console.error('❌ Error saving game record:', e);
+            alert('Error saving game record: ' + e.message);
+        }
+    };
+
+    // === ONE-CLICK FIX: Perpetual Check Game ===
+    window.fixPerpetualCheckGame = async () => {
+        const targetDocId = 'pJKq5Rpf7mEmkcX4AmZo_1771340322522';
+
+        const correctData = {
+            winner: 'black',
+            reason: 'perpetual-check',
+            eloChanges: {
+                red: { oldRating: 1002, newRating: 981, change: -21 },
+                black: { oldRating: 1178, newRating: 1199, change: 21 }
+            }
+        };
+
+        const msg = `Fix perpetual check game?\n\nDoc: ${targetDocId}\n\nChanges:\n- winner: red → black\n- reason: perpetual-check\n- Red ELO: 1002 → 981 (change: -21)\n- Black ELO: 1178 → 1199 (change: +21)\n\nThis will update:\n1. Centralized all-game-history\n2. Per-user game-history for both players`;
+
+        if (!confirm(msg)) return;
+
+        try {
+            console.log('🔧 Step 1: Creating document reference...');
+            const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'all-game-history', targetDocId);
+            console.log('🔧 Step 1 OK. Path:', docRef.path);
+
+            console.log('🔧 Step 2: Reading current document FROM SERVER...');
+            const currentSnap = await getDocFromServer(docRef);
+            if (!currentSnap.exists()) {
+                alert('ERROR: Document does not exist! Path: ' + docRef.path);
+                return;
+            }
+            const currentData = currentSnap.data();
+            console.log('🔧 Step 2 OK. Current winner:', currentData.winner, 'Current reason:', currentData.reason);
+            console.log('🔧 Current eloChanges:', JSON.stringify(currentData.eloChanges));
+
+            console.log('🔧 Step 3: Calling updateDoc with correct values...');
+            await updateDoc(docRef, correctData);
+            console.log('🔧 Step 3 OK. updateDoc completed without error.');
+
+            console.log('🔧 Step 4: Re-reading document FROM SERVER to verify write succeeded...');
+            const verifySnap = await getDocFromServer(docRef);
+            const verifyData = verifySnap.data();
+            console.log('🔧 Step 4 Verification:', JSON.stringify({
+                winner: verifyData.winner,
+                reason: verifyData.reason,
+                eloChanges: verifyData.eloChanges
+            }));
+
+            if (verifyData.winner === 'black' && verifyData.eloChanges?.black?.newRating === 1199) {
+                console.log('✅ VERIFIED: Document successfully updated!');
+
+                // Now update per-user copies
+                console.log('🔧 Step 5: Updating per-user game-history copies...');
+                const redUid = currentData.playerRed?.uid;
+                const blackUid = currentData.playerBlack?.uid;
+
+                for (const uid of [redUid, blackUid]) {
+                    if (!uid) continue;
+                    try {
+                        const userDocRef = doc(db, 'artifacts', appId, 'users', uid, 'game-history', targetDocId);
+                        const userSnap = await getDoc(userDocRef);
+                        if (userSnap.exists()) {
+                            await updateDoc(userDocRef, correctData);
+                            console.log(`✅ Updated per-user history for ${uid} (exact ID match)`);
+                        } else {
+                            // Try finding by gameId field
+                            const histCol = collection(db, 'artifacts', appId, 'users', uid, 'game-history');
+                            const histSnap = await getDocs(histCol);
+                            let found = false;
+                            for (const d of histSnap.docs) {
+                                const gdata = d.data();
+                                if (gdata.gameId === targetDocId || gdata.gameId === 'pJKq5Rpf7mEmkcX4AmZo_1771340322522') {
+                                    await updateDoc(d.ref, correctData);
+                                    console.log(`✅ Updated per-user history for ${uid} (gameId match, doc: ${d.id})`);
+                                    found = true;
+                                    break;
+                                }
+                            }
+                            if (!found) {
+                                console.warn(`⚠️ No per-user game-history found for ${uid}`);
+                            }
+                        }
+                    } catch (e) {
+                        console.warn(`⚠️ Per-user update error for ${uid}:`, e);
+                    }
+                }
+
+                alert('✅ Perpetual check game FIXED!\n\nWinner: BLACK\nRed: 1002→981 (-21)\nBlack: 1178→1199 (+21)\n\nCheck console (F12) for details.\nNow rebuild Player Stats using the Build Stats button.');
+                loadGameRecords(); // Refresh display
+            } else {
+                alert('❌ VERIFICATION FAILED!\nDocument did not update.\nwinner=' + verifyData.winner + '\nCheck F12 console for details.');
+            }
+        } catch (e) {
+            console.error('❌ fixPerpetualCheckGame FAILED:', e);
+            console.error('Error code:', e.code);
+            console.error('Error message:', e.message);
+            alert('❌ Fix failed: ' + e.message + '\n\nCheck F12 console for details.');
+        }
+    };
+
+    // === PLAYER STATS MANAGEMENT ===
+    window.togglePlayerStats = () => {
+        const statsSection = document.getElementById('player-stats-section');
+        const userSection = document.getElementById('user-management-section');
+        const bugSection = document.getElementById('bug-reports-section');
+        const gameRecordsSection = document.getElementById('game-records-section');
+        const regionColumn = document.getElementById('region-column');
+        const tablesColumn = document.getElementById('tables-column');
+
+        if (statsSection.style.display === 'none') {
+            statsSection.style.display = 'block';
+            userSection.style.display = 'none';
+            bugSection.style.display = 'none';
+            gameRecordsSection.style.display = 'none';
+            regionColumn.style.display = 'none';
+            tablesColumn.style.display = 'none';
+            loadPlayerStats();
+        } else {
+            statsSection.style.display = 'none';
+            regionColumn.style.display = 'block';
+            tablesColumn.style.display = 'block';
+            if (playerStatsUnsubscribe) {
+                playerStatsUnsubscribe();
+                playerStatsUnsubscribe = null;
+            }
+        }
+    };
+
+    window.refreshPlayerStats = () => {
+        loadPlayerStats();
+    };
+
+    function loadPlayerStats() {
+        const statsRef = doc(db, 'artifacts', appId, 'player-stats', 'current');
+
+        if (playerStatsUnsubscribe) playerStatsUnsubscribe();
+
+        playerStatsUnsubscribe = onSnapshot(statsRef, (snap) => {
+            const tbody = document.getElementById('player-stats-body');
+
+            if (!snap.exists()) {
+                tbody.innerHTML = '<tr><td colspan="11" style="text-align:center; padding:40px; color:#94a3b8;"><strong>No player-stats document found</strong><br><br>Click the <strong style="color:#f59e0b;">🔨 Build Stats</strong> button above to create it from game history.</td></tr>';
+                document.getElementById('stats-total-players').textContent = '0';
+                document.getElementById('stats-total-games').textContent = '0';
+                document.getElementById('stats-highest-elo').textContent = '-';
+                document.getElementById('stats-last-updated').textContent = '-';
+                return;
+            }
+
+            const allStats = snap.data();
+            const players = [];
+
+            for (const [uid, data] of Object.entries(allStats)) {
+                if (uid.startsWith('_')) continue;
+                players.push({
+                    uid,
+                    playerName: data.playerName || 'Unknown',
+                    elo: data.elo || 1200,
+                    gamesPlayed: data.gamesPlayed || 0,
+                    wins: data.wins || 0,
+                    losses: data.losses || 0,
+                    draws: data.draws || 0,
+                    lastGameAt: data.lastGameAt || 0
+                });
+            }
+
+            // Sort by ELO descending
+            players.sort((a, b) => b.elo - a.elo);
+
+            // Update summary stats
+            const totalGames = players.reduce((sum, p) => sum + p.gamesPlayed, 0);
+            const highestElo = players.length > 0 ? players[0] : null;
+            const updatedAt = allStats._updatedAt ? new Date(allStats._updatedAt).toLocaleString() : '-';
+
+            document.getElementById('stats-total-players').textContent = players.length;
+            document.getElementById('stats-total-games').textContent = Math.round(totalGames / 2);
+            document.getElementById('stats-highest-elo').textContent = highestElo ? `${highestElo.elo} (${highestElo.playerName})` : '-';
+            document.getElementById('stats-last-updated').textContent = updatedAt;
+
+            // Render table
+            tbody.innerHTML = '';
+
+            if (players.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="11" style="text-align:center; padding:40px; color:#94a3b8;">No players in stats document yet.</td></tr>';
+                return;
+            }
+
+            players.forEach((player, index) => {
+                const row = document.createElement('tr');
+                const winRate = player.gamesPlayed > 0 ? (player.wins / player.gamesPlayed * 100).toFixed(1) : '0.0';
+                const provisional = player.gamesPlayed < 30 ? '?' : '';
+                const eloColor = player.elo >= 1800 ? '#f59e0b' : (player.elo >= 1400 ? '#3b82f6' : (player.elo >= 1200 ? '#10b981' : '#ef4444'));
+                const lastGame = player.lastGameAt > 0 ? formatRelativeTime(player.lastGameAt) : 'Never';
+
+                const winRateColor = parseFloat(winRate) >= 60 ? '#10b981' : (parseFloat(winRate) >= 40 ? '#f59e0b' : '#ef4444');
+
+                row.innerHTML = `
+                    <td style="font-weight:900; color:#64748b; text-align:center;">${index + 1}</td>
+                    <td><strong>${player.playerName}</strong></td>
+                    <td style="font-family:monospace; font-size:0.75rem; color:#64748b;">${player.uid.substring(0, 12)}...</td>
+                    <td style="text-align:center; font-weight:900; color:${eloColor}; font-size:1.1rem;">${player.elo}${provisional}</td>
+                    <td style="text-align:center; font-weight:700;">${player.gamesPlayed}</td>
+                    <td style="text-align:center; color:#10b981; font-weight:700;">${player.wins}</td>
+                    <td style="text-align:center; color:#ef4444; font-weight:700;">${player.losses}</td>
+                    <td style="text-align:center; color:#64748b; font-weight:700;">${player.draws}</td>
+                    <td style="text-align:center; font-weight:700; color:${winRateColor};">${winRate}%</td>
+                    <td style="color:#64748b; font-size:0.85rem;">${lastGame}</td>
+                    <td>
+                        <button class="btn btn-sm" style="background:#8b5cf6; color:white;" onclick="editPlayerStats('${player.uid}')">✏️ Edit</button>
+                    </td>
+                `;
+                tbody.appendChild(row);
+            });
+        });
+    }
+
+    window.editPlayerStats = async (uid) => {
+        try {
+            const statsRef = doc(db, 'artifacts', appId, 'player-stats', 'current');
+            const snap = await getDoc(statsRef);
+
+            if (!snap.exists()) { alert('player-stats document not found'); return; }
+
+            const allStats = snap.data();
+            const playerData = allStats[uid];
+
+            if (!playerData) { alert('Player not found in stats'); return; }
+
+            document.getElementById('edit-stats-uid').value = uid;
+            document.getElementById('edit-stats-name').value = playerData.playerName || 'Unknown';
+            document.getElementById('edit-stats-elo').value = playerData.elo || 1200;
+            document.getElementById('edit-stats-games').value = playerData.gamesPlayed || 0;
+            document.getElementById('edit-stats-wins').value = playerData.wins || 0;
+            document.getElementById('edit-stats-losses').value = playerData.losses || 0;
+            document.getElementById('edit-stats-draws').value = playerData.draws || 0;
+
+            document.getElementById('edit-stats-modal').style.display = 'flex';
+        } catch (e) {
+            alert('Error loading player data: ' + e.message);
+        }
+    };
+
+    window.savePlayerStats = async () => {
+        const uid = document.getElementById('edit-stats-uid').value;
+        if (!uid) return;
+
+        const newElo = parseInt(document.getElementById('edit-stats-elo').value);
+        const newGames = parseInt(document.getElementById('edit-stats-games').value);
+        const newWins = parseInt(document.getElementById('edit-stats-wins').value);
+        const newLosses = parseInt(document.getElementById('edit-stats-losses').value);
+        const newDraws = parseInt(document.getElementById('edit-stats-draws').value);
+
+        if (isNaN(newElo) || isNaN(newGames) || isNaN(newWins) || isNaN(newLosses) || isNaN(newDraws)) {
+            alert('All fields must be valid numbers');
+            return;
+        }
+
+        if (!confirm(`Update stats for this player?\n\nELO: ${newElo}\nGames: ${newGames}\nWins: ${newWins} / Losses: ${newLosses} / Draws: ${newDraws}`)) return;
+
+        try {
+            const statsRef = doc(db, 'artifacts', appId, 'player-stats', 'current');
+            const updateData = {};
+            updateData[`${uid}.elo`] = newElo;
+            updateData[`${uid}.gamesPlayed`] = newGames;
+            updateData[`${uid}.wins`] = newWins;
+            updateData[`${uid}.losses`] = newLosses;
+            updateData[`${uid}.draws`] = newDraws;
+            updateData['_updatedAt'] = Date.now();
+
+            await updateDoc(statsRef, updateData);
+
+            alert('Player stats updated successfully!');
+            closeModals();
+        } catch (e) {
+            alert('Error saving stats: ' + e.message);
+        }
+    };
+
+    // === BUILD PLAYER STATS FROM GAME HISTORY (stats only, no game record fixes) ===
+    window.buildPlayerStats = async () => {
+        if (!confirm('Build/rebuild the player-stats document from all game history?\n\nThis reads game records as-is and computes stats. Fix game records first using the Edit button in Game Records.')) return;
+
+        try {
+            const statusEl = document.getElementById('player-stats-body');
+            statusEl.innerHTML = '<tr><td colspan="11" style="text-align:center; padding:40px; color:#8b5cf6;"><strong>Building player-stats...</strong><br>Scanning all game history...</td></tr>';
+
+            const statsRef = doc(db, 'artifacts', appId, 'player-stats', 'current');
+            const centralCol = collection(db, 'artifacts', appId, 'public', 'data', 'all-game-history');
+            const centralSnap = await getDocs(centralCol);
+            const stats = {};
+
+            // Sort games by completedAt so ELO tracks chronologically
+            const allGames = [];
+            for (const d of centralSnap.docs) {
+                allGames.push(d.data());
+            }
+            allGames.sort((a, b) => (a.completedAt || 0) - (b.completedAt || 0));
+
+            for (const g of allGames) {
+                const redUid = g.playerRed?.uid;
+                const blackUid = g.playerBlack?.uid;
+                if (!redUid || !blackUid) continue;
+
+                // Initialize players if not yet seen
+                if (!stats[redUid]) stats[redUid] = { playerName: g.playerRed?.playerName || 'Unknown', elo: 1200, gamesPlayed: 0, wins: 0, losses: 0, draws: 0, lastGameAt: 0 };
+                if (!stats[blackUid]) stats[blackUid] = { playerName: g.playerBlack?.playerName || 'Unknown', elo: 1200, gamesPlayed: 0, wins: 0, losses: 0, draws: 0, lastGameAt: 0 };
+
+                if (g.playerRed?.playerName) stats[redUid].playerName = g.playerRed.playerName;
+                if (g.playerBlack?.playerName) stats[blackUid].playerName = g.playerBlack.playerName;
+
+                stats[redUid].gamesPlayed++;
+                stats[blackUid].gamesPlayed++;
+
+                if (g.winner === 'red') { stats[redUid].wins++; stats[blackUid].losses++; }
+                else if (g.winner === 'black') { stats[blackUid].wins++; stats[redUid].losses++; }
+                else { stats[redUid].draws++; stats[blackUid].draws++; }
+
+                const t = g.completedAt || 0;
+                if (t > stats[redUid].lastGameAt) stats[redUid].lastGameAt = t;
+                if (t > stats[blackUid].lastGameAt) stats[blackUid].lastGameAt = t;
+
+                if (g.eloChanges?.red?.newRating) stats[redUid].elo = g.eloChanges.red.newRating;
+                if (g.eloChanges?.black?.newRating) stats[blackUid].elo = g.eloChanges.black.newRating;
+            }
+
+            // Fetch current profile names
+            const allUids = Object.keys(stats).filter(k => !k.startsWith('_'));
+            for (const uid of allUids) {
+                try {
+                    const profileSnap = await getDoc(doc(db, 'artifacts', appId, 'users', uid, 'profile', 'data'));
+                    if (profileSnap.exists() && profileSnap.data().playerName) {
+                        stats[uid].playerName = profileSnap.data().playerName;
+                    }
+                } catch (e) { /* skip */ }
+            }
+
+            stats._updatedAt = Date.now();
+            await setDoc(statsRef, stats);
+
+            const playerCount = Object.keys(stats).filter(k => !k.startsWith('_')).length;
+            console.log(`✅ player-stats built: ${playerCount} players, ${centralSnap.size} games scanned`);
+            alert(`Player stats built successfully!\n\n${playerCount} players\n${centralSnap.size} games scanned`);
+
+        } catch (e) {
+            console.error('❌ Build player-stats error:', e);
+            alert('Error building stats: ' + e.message);
+        }
     };
 </script>
 </body>

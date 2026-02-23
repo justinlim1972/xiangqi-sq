@@ -139,6 +139,8 @@
 
         <button class="btn-collection" title="Player Rankings" onclick="window.location.href=window.location.origin + '/game/ranking.html'">🏆</button>
 
+        <button class="btn-collection" title="Knowledge Base" onclick="window.location.href=window.location.origin + '/game/knowledge_base.html'">📚</button>
+
         <button class="btn-setup" title="Visual & Avatar Settings" onclick="window.location.href=window.location.origin + '/lobby/setting.html'">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                 <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
@@ -167,10 +169,81 @@
 <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
     import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-    import { getFirestore, collection, doc, onSnapshot, query, orderBy, updateDoc, deleteField, setDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+    import { getFirestore, collection, doc, onSnapshot, query, orderBy, updateDoc, deleteField, setDoc, getDoc, getDocs, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+    import { getDatabase, ref, remove as rtdbRemove } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-database.js";
 
     const firebaseConfig = { apiKey: "AIzaSyDq_LECOrc4SY90SyDsBQGmwl-YnUNFIj8", authDomain: "xiangqi-sq.firebaseapp.com", projectId: "xiangqi-sq", storageBucket: "xiangqi-sq.firebasestorage.app", messagingSenderId: "351923336298", appId: "1:351923336298:web:e7278ea095ba085ac4935b" };
-    const app = initializeApp(firebaseConfig); const auth = getAuth(app); const db = getFirestore(app); const appId = "sg-xiangqi";
+    const app = initializeApp(firebaseConfig); const auth = getAuth(app); const db = getFirestore(app); const rtdb = getDatabase(app); const appId = "sg-xiangqi";
+
+    // Track tables currently being cleaned to prevent duplicate cleanup attempts
+    const cleaningInProgress = new Set();
+    const ROOM_INACTIVITY_TIMEOUT = 60 * 60 * 1000; // 1 hour
+
+    /**
+     * Auto-clean stale rooms from the lobby.
+     * Called when lobby renders a table that has been inactive for 1+ hour
+     * with no players seated.
+     */
+    async function cleanStaleRoom(regionId, tableId) {
+        const key = `${regionId}/${tableId}`;
+        if (cleaningInProgress.has(key)) return;
+        cleaningInProgress.add(key);
+
+        try {
+            console.log(`🧹 Auto-cleaning stale room: ${tableId}`);
+
+            const tableRef = doc(db, "artifacts", appId, "public", "data", "regions", regionId, "tables", tableId);
+            const gameRef = doc(db, "artifacts", appId, "public", "data", "games", tableId);
+
+            // Safety check: verify game data is also stale before wiping
+            const gSnap = await getDoc(gameRef);
+            const gData = gSnap.exists() ? gSnap.data() : {};
+            const gameIsActive = gData.status === 'playing';
+            const gameJustFinished = gData.finishedAt && (Date.now() - gData.finishedAt < 300000); // 5 min grace
+            const hasGameHistory = (gData.history || []).length > 0;
+
+            if (gameIsActive || gameJustFinished || hasGameHistory) {
+                // Game data still present — don't wipe, just update lastActivityAt
+                console.log(`⚠️ Skipping stale cleanup for ${tableId} - game data still present`);
+                await setDoc(tableRef, { lastActivityAt: Date.now() }, { merge: true });
+                return;
+            }
+
+            // 1. Clear table occupants and stale flags
+            await setDoc(tableRef, {
+                occupants: [],
+                queue: [],
+                matchActive: false,
+                battleRequest: deleteField(),
+                lastActivityAt: Date.now(),
+                playerRedSeatedAt: deleteField(),
+                playerBlackSeatedAt: deleteField(),
+                playerRedWarned: false,
+                playerBlackWarned: false,
+                postGameIdle: false
+            }, { merge: true });
+
+            // 2. Clear chat and reset game state
+            await setDoc(gameRef, {
+                chat: [],
+                board: null,
+                status: 'waiting',
+                history: [],
+                moveHistory: [],
+                turn: 'red'
+            }, { merge: true });
+
+            // 3. Clear RTDB presence for this table
+            const presenceRef = ref(rtdb, `presence/${regionId}/${tableId}`);
+            await rtdbRemove(presenceRef);
+
+            console.log(`✅ Stale room cleaned: ${tableId}`);
+        } catch (e) {
+            console.error(`❌ Failed to clean stale room ${tableId}:`, e);
+        } finally {
+            cleaningInProgress.delete(key);
+        }
+    }
     
     const mahjongTiles = ['🀀', '🀁', '🀂', '🀃', '🀄', '🀅', '🀆', '🀇', '🀈', '🀉', '🀊', '🀋', '🀌', '🀍', '🀎', '🀏', '🀐', '🀑', '🀒', '🀓', '🀔', '🀕', '🀖', '🀗', '🀘', '🀙', '🀚', '🀛', '🀜', '🀝', '🀞', '🀟'];
     window.isAdmin = false;
@@ -198,6 +271,77 @@
             // Initial presence update
             await updatePresence();
 
+            // ========== BUILD player-stats SINGLE DOCUMENT (source of truth) ==========
+            try {
+                const statsRef = doc(db, 'artifacts', appId, 'player-stats', 'current');
+                const statsSnap = await getDoc(statsRef);
+                if (!statsSnap.exists()) {
+                    console.log('📊 Building player-stats document from game history...');
+                    const centralCol = collection(db, 'artifacts', appId, 'public', 'data', 'all-game-history');
+                    const centralSnap = await getDocs(centralCol);
+                    const stats = {};
+
+                    // Sort games chronologically
+                    const allGames = [];
+                    for (const d of centralSnap.docs) { allGames.push({ ref: d.ref, data: d.data() }); }
+                    allGames.sort((a, b) => (a.data.completedAt || 0) - (b.data.completedAt || 0));
+
+                    for (const { ref, data: g } of allGames) {
+                        const redUid = g.playerRed?.uid;
+                        const blackUid = g.playerBlack?.uid;
+                        if (!redUid || !blackUid) continue;
+
+                        // Fix perpetual check game while scanning
+                        if (redUid === '7Ab3sPTyZRNCdkmeYDzOOlq4Tn2' &&
+                            blackUid === 'OQXCLt4YmlXFoTGLD4MvpRN5utc2' &&
+                            g.totalMoves > 80) {
+                            g.winner = 'black';
+                            g.eloChanges = { red: { oldRating: 1002, newRating: 981, change: -21 }, black: { oldRating: 1178, newRating: 1199, change: 21 } };
+                            await setDoc(ref, { winner: 'black', reason: 'perpetual-check-corrected', eloChanges: g.eloChanges }, { merge: true });
+                        }
+                        // Fix timeout game ELO
+                        if (redUid === 'OQXCLt4YmlXFoTGLD4MvpRN5utc2' &&
+                            blackUid === '7Ab3sPTyZRNCdkmeYDzOOlq4Tn2' &&
+                            g.winner === 'red' && g.totalMoves > 30 && g.totalMoves < 60 &&
+                            g.eloChanges?.red?.oldRating === 1154) {
+                            g.eloChanges = { red: { oldRating: 1199, newRating: 1210, change: 11 }, black: { oldRating: 981, newRating: 970, change: -11 } };
+                            await setDoc(ref, { eloChanges: g.eloChanges }, { merge: true });
+                        }
+
+                        if (!stats[redUid]) stats[redUid] = { playerName: g.playerRed?.playerName || 'Unknown', elo: 1200, gamesPlayed: 0, wins: 0, losses: 0, draws: 0, lastGameAt: 0 };
+                        if (!stats[blackUid]) stats[blackUid] = { playerName: g.playerBlack?.playerName || 'Unknown', elo: 1200, gamesPlayed: 0, wins: 0, losses: 0, draws: 0, lastGameAt: 0 };
+                        if (g.playerRed?.playerName) stats[redUid].playerName = g.playerRed.playerName;
+                        if (g.playerBlack?.playerName) stats[blackUid].playerName = g.playerBlack.playerName;
+
+                        stats[redUid].gamesPlayed++;
+                        stats[blackUid].gamesPlayed++;
+
+                        if (g.winner === 'red') { stats[redUid].wins++; stats[blackUid].losses++; }
+                        else if (g.winner === 'black') { stats[blackUid].wins++; stats[redUid].losses++; }
+                        else { stats[redUid].draws++; stats[blackUid].draws++; }
+
+                        const t = g.completedAt || 0;
+                        if (t > stats[redUid].lastGameAt) stats[redUid].lastGameAt = t;
+                        if (t > stats[blackUid].lastGameAt) stats[blackUid].lastGameAt = t;
+
+                        if (g.eloChanges?.red?.newRating) stats[redUid].elo = g.eloChanges.red.newRating;
+                        if (g.eloChanges?.black?.newRating) stats[blackUid].elo = g.eloChanges.black.newRating;
+                    }
+
+                    // Fetch current profile names
+                    for (const uid of Object.keys(stats).filter(k => !k.startsWith('_'))) {
+                        try {
+                            const ps = await getDoc(doc(db, 'artifacts', appId, 'users', uid, 'profile', 'data'));
+                            if (ps.exists() && ps.data().playerName) stats[uid].playerName = ps.data().playerName;
+                        } catch (e) { /* skip */ }
+                    }
+
+                    stats._updatedAt = Date.now();
+                    await setDoc(statsRef, stats);
+                    console.log('✅ player-stats document built with', Object.keys(stats).length - 1, 'players');
+                }
+            } catch (buildErr) { console.warn('player-stats build error:', buildErr); }
+
             // Update presence every 60 seconds while on the page
             const presenceInterval = setInterval(updatePresence, 60000);
 
@@ -206,28 +350,40 @@
                 clearInterval(presenceInterval);
             });
 
+            // ========== DISPLAY: Read ELO from player-stats (single source of truth) ==========
+            // Also listen to profile for avatar/name/admin role
             onSnapshot(doc(db, 'artifacts', appId, 'users', user.uid, 'profile', 'data'), (snap) => {
                 if (snap.exists()) {
                     const d = snap.data();
-                    const elo = d.elo || 1200;
-                    const gamesPlayed = d.gamesPlayed || 0;
-                    const provisional = gamesPlayed < 30 ? '?' : '';
-
-                    // Display name with ELO rating
-                    document.getElementById('user-info').innerHTML = `
-                        ${d.playerName || user.email}
-                        <span style="color:#f59e0b; font-weight:700; margin-left:8px;">
-                            ${elo}${provisional}
-                        </span>
-                    `;
-
                     if (d.avatarUrl) document.getElementById('display-avatar').src = d.avatarUrl;
                     if (d.role === 'admin') {
                         document.getElementById('admin-link-btn').style.display = 'block';
                         window.isAdmin = true;
                     }
+                    // Store playerName for fallback
+                    window._profileName = d.playerName || user.email;
                 }
             });
+
+            // Real-time ELO from player-stats
+            onSnapshot(doc(db, 'artifacts', appId, 'player-stats', 'current'), (snap) => {
+                if (snap.exists()) {
+                    const allStats = snap.data();
+                    const myStats = allStats[user.uid];
+                    if (myStats) {
+                        const elo = myStats.elo || 1200;
+                        const gamesPlayed = myStats.gamesPlayed || 0;
+                        const provisional = gamesPlayed < 30 ? '?' : '';
+                        document.getElementById('user-info').innerHTML = `
+                            ${myStats.playerName || window._profileName || user.email}
+                            <span style="color:#f59e0b; font-weight:700; margin-left:8px;">
+                                ${elo}${provisional}
+                            </span>
+                        `;
+                    }
+                }
+            });
+
             listenToRegions();
         }
     });
@@ -319,6 +475,16 @@
             grid.innerHTML = "";
             snapshot.forEach(tableDoc => {
                 const t = tableDoc.data();
+
+                // Auto-clean stale rooms: no players seated + inactive for 1+ hour + has ghost occupants
+                const hasPlayers = t.playerRed || t.playerBlack;
+                const hasGhostOccupants = (t.occupants || []).length > 0;
+                const lastActivity = t.lastActivityAt || 0;
+                const isStale = !hasPlayers && (Date.now() - lastActivity > ROOM_INACTIVITY_TIMEOUT) && (hasGhostOccupants || t.matchActive);
+                if (isStale && !isLecture) {
+                    cleanStaleRoom(regionId, tableDoc.id);
+                }
+
                 const isDoubleSat = t.playerRed && t.playerBlack && t.playerRed.uid === t.playerBlack.uid;
                 const isFull = t.playerRed && t.playerBlack;
 

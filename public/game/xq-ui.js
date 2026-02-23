@@ -68,7 +68,7 @@ export class XQUI {
         `;
     }
 
-    renderPieces(board, labels, clickFn, pieceStyle = 'ivory', lastMove = null, selectedPiece = null) {
+    renderPieces(board, labels, clickFn, pieceStyle = 'ivory', lastMove = null, selectedPiece = null, rotated = false) {
         const layer = document.getElementById('pieces-layer');
         if (!layer) {
             console.error('❌ pieces-layer element not found!');
@@ -81,12 +81,10 @@ export class XQUI {
         }
 
         const template = this.pieceTemplates[pieceStyle] || this.pieceTemplates.ivory;
-        console.log('🎨 Rendering pieces with style:', pieceStyle, 'lastMove:', lastMove, 'selectedPiece:', selectedPiece);
 
         layer.innerHTML = "";
         board.forEach((row, y) => {
             if (!Array.isArray(row)) {
-                console.error(`❌ Row ${y} is not an array!`, typeof row, row);
                 return;
             }
             row.forEach((p, x) => {
@@ -99,20 +97,23 @@ export class XQUI {
                 // Add 'piece-selected' class if this is the currently selected piece
                 if (selectedPiece && selectedPiece.x === x && selectedPiece.y === y) {
                     el.classList.add('piece-selected');
-                    console.log(`🟡 Highlighting selected piece at (${x}, ${y})`);
                 }
 
                 // Add 'last-moved' class if this is the piece that was just moved
                 if (lastMove && lastMove.to) {
-                    console.log(`🔍 Piece at (${x}, ${y}) vs lastMove.to (${lastMove.to.x}, ${lastMove.to.y})`);
                     if (lastMove.to.x === x && lastMove.to.y === y) {
                         el.classList.add('last-moved');
-                        console.log(`✅ ✨ APPLIED last-moved to piece at (${x}, ${y})!`);
                     }
                 }
 
-                el.style.left = `${10+x*10}%`;
-                el.style.top = `${((10+y*10)/110)*100}%`;
+                if (rotated) {
+                    // Rotated 90° CW: board x(0-8) maps to visual y, board y(0-9) maps to visual x
+                    el.style.left = `${((10 + y * 10) / 110) * 100}%`;
+                    el.style.top = `${10 + (8 - x) * 10}%`;
+                } else {
+                    el.style.left = `${10+x*10}%`;
+                    el.style.top = `${((10+y*10)/110)*100}%`;
+                }
                 const isRed = p === p.toUpperCase();
                 const char = labels[p];
                 el.innerHTML = template(char, isRed);

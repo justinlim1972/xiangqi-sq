@@ -1,0 +1,3190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Knowledge Base - SG Xiangqi</title>
+    <style>
+        :root {
+            --primary: #cd3333;
+            --gold: #f1c40f;
+            --dark: #2c3e50;
+            --bg: #f0f2f5;
+            --success: #10b981;
+            --info: #3b82f6;
+            --board-line: #5d2e0c;
+            --board-bg: #dcb35c;
+            --board-border: #2a1a10;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: var(--bg);
+            color: #333;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* Header */
+        header {
+            background: var(--primary);
+            color: white;
+            padding: 12px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.15);
+            z-index: 100;
+            flex-shrink: 0;
+        }
+
+        header h1 {
+            font-size: 1.4rem;
+            font-weight: 900;
+            letter-spacing: -0.5px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .game-count-badge {
+            background: rgba(255,255,255,0.25);
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 700;
+        }
+
+        .btn-back {
+            background: rgba(255,255,255,0.2);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 700;
+            transition: 0.2s;
+            text-decoration: none;
+            font-size: 0.85rem;
+        }
+        .btn-back:hover { background: rgba(255,255,255,0.3); }
+
+        /* Main Layout */
+        .main-layout {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        /* Board Area */
+        .board-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 10px;
+            background: #e2e5e9;
+            min-width: 0;
+        }
+
+        .board-and-comment {
+            display: flex;
+            align-items: flex-start;
+            gap: 15px;
+            justify-content: center;
+        }
+
+        .board-column {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            flex-shrink: 0;
+        }
+
+        .board-container {
+            position: relative;
+            height: calc(100vh - 130px);
+            aspect-ratio: 10 / 11;
+            border: 10px solid var(--board-border);
+            background: var(--board-bg);
+            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+            border-radius: 4px;
+            flex-shrink: 0;
+        }
+
+        #board-svg { width: 100%; height: 100%; display: block; }
+        #hints-layer, #pieces-layer {
+            position: absolute; top: 0; left: 0;
+            width: 100%; height: 100%; pointer-events: none;
+        }
+        #pieces-layer { z-index: 10; pointer-events: auto; }
+        #hints-layer { z-index: 30; pointer-events: none; }
+
+        .board-container.board-rotated {
+            aspect-ratio: 11 / 10;
+        }
+        .board-container.board-rotated .piece {
+            width: 8.2%; height: 9.1%;
+        }
+        .board-container.board-rotated .move-hint {
+            width: 3.6%; height: 4%;
+        }
+
+        .piece {
+            position: absolute; width: 9.1%; height: 8.2%;
+            transform: translate(-50%, -50%);
+            transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            z-index: 20; cursor: pointer;
+        }
+        .piece-selected {
+            filter: drop-shadow(0 0 15px #f1c40f) brightness(1.3);
+            transform: translate(-50%, -50%) scale(1.1);
+            z-index: 25 !important;
+        }
+        .last-moved {
+            filter: drop-shadow(0 0 15px #22c55e) brightness(1.15);
+        }
+        .move-hint {
+            position: absolute; width: 4%; height: 3.6%;
+            background: rgba(34, 197, 94, 0.4);
+            border: 2px solid rgba(34, 197, 94, 0.6);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            cursor: pointer; z-index: 15;
+            pointer-events: auto;
+        }
+
+        /* Navigation */
+        .board-controls {
+            margin-top: 6px;
+            flex-shrink: 0;
+        }
+
+        .nav-buttons {
+            display: flex;
+            gap: 6px;
+            justify-content: center;
+            margin-bottom: 8px;
+        }
+
+        .nav-btn {
+            background: white;
+            border: 1px solid #d1d5db;
+            padding: 6px 10px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 700;
+            transition: 0.2s;
+            color: #374151;
+        }
+        .nav-btn:hover { background: #f3f4f6; transform: translateY(-1px); }
+        .nav-btn:active { transform: translateY(0); }
+
+        .comment-area {
+            width: 270px;
+            flex-shrink: 0;
+        }
+
+        .comment-area textarea {
+            width: 100%;
+            height: calc(100vh - 150px);
+            padding: 8px 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            font-family: inherit;
+            font-size: 0.85rem;
+            resize: none;
+            background: white;
+            color: #333;
+        }
+        .comment-area textarea:focus { outline: none; border-color: var(--info); box-shadow: 0 0 0 3px rgba(59,130,246,0.1); }
+
+        .comment-area .comment-label {
+            font-size: 0.7rem;
+            color: #6b7280;
+            margin-bottom: 4px;
+            font-weight: 600;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 380px;
+            background: white;
+            border-left: 1px solid #e2e8f0;
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+            overflow: hidden;
+        }
+
+        /* Sidebar Tabs */
+        .sidebar-tabs {
+            display: flex;
+            gap: 0;
+            background: #1a1a1a;
+            border-bottom: 2px solid #333;
+            flex-shrink: 0;
+        }
+        .sidebar-tab {
+            flex: 1;
+            padding: 12px 8px;
+            background: #111;
+            border: none;
+            color: #777;
+            font-weight: 900;
+            font-size: 0.7rem;
+            letter-spacing: 1px;
+            cursor: pointer;
+            transition: all 0.3s;
+            border-bottom: 3px solid transparent;
+            text-transform: uppercase;
+        }
+        .sidebar-tab:hover { background: #222; color: #aaa; }
+        .sidebar-tab.active { background: #000; color: var(--gold); border-bottom-color: var(--gold); }
+
+        .tab-content {
+            display: none;
+            flex: 1;
+            overflow-y: auto;
+            min-height: 0;
+        }
+        .tab-content.active {
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* MOVES TAB */
+        .moves-grid {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+        }
+        .moves-header {
+            display: grid;
+            grid-template-columns: 40px 1fr 1fr;
+            gap: 4px;
+            padding: 6px 8px;
+            background: #f1f5f9;
+            border-radius: 6px;
+            font-size: 0.7rem;
+            font-weight: 800;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 6px;
+        }
+        .move-row {
+            display: grid;
+            grid-template-columns: 40px 1fr 1fr;
+            gap: 4px;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            transition: 0.15s;
+        }
+        .move-row:hover { background: #f8fafc; }
+        .move-round {
+            font-weight: 700;
+            color: #94a3b8;
+            font-size: 0.75rem;
+        }
+        .move-cell {
+            padding: 4px 6px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: 0.15s;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .move-cell:hover { background: #e2e8f0; }
+        .move-cell.active { background: var(--info); color: white; }
+        .move-cell.red-move { color: var(--primary); }
+        .move-cell.black-move { color: #1e293b; }
+        .move-cell .move-icon { font-size: 0.65rem; }
+
+        /* Variation sub-list */
+        .variation-container {
+            grid-column: 1 / -1;
+            margin: 4px 0 4px 40px;
+            padding: 6px 10px;
+            background: #fef3c7;
+            border-left: 3px solid var(--gold);
+            border-radius: 0 6px 6px 0;
+            font-size: 0.75rem;
+        }
+        .variation-label {
+            font-weight: 800;
+            color: #92400e;
+            margin-bottom: 4px;
+            font-size: 0.7rem;
+        }
+        .variation-move {
+            display: inline-block;
+            padding: 2px 6px;
+            margin: 2px;
+            border-radius: 4px;
+            background: #fde68a;
+            cursor: pointer;
+            font-weight: 600;
+        }
+        .variation-move:hover { background: #fbbf24; }
+        .variation-move.active { background: var(--info); color: white; }
+        .var-collapse-toggle {
+            cursor: pointer;
+            font-size: 0.6rem;
+            opacity: 0.7;
+            display: inline-block;
+            transition: 0.15s;
+            user-select: none;
+        }
+        .var-collapse-toggle:hover { opacity: 1; transform: scale(1.2); }
+        .var-delete, .var-edit {
+            cursor: pointer;
+            margin-left: 4px;
+            opacity: 0.5;
+            font-size: 0.7rem;
+            display: inline-block;
+        }
+        .var-delete:hover, .var-edit:hover { opacity: 1; }
+
+        .variation-badges {
+            grid-column: 1 / -1;
+            display: flex;
+            gap: 4px;
+            padding: 3px 0 3px 40px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        .expand-collapse-bar {
+            display: flex;
+            gap: 4px;
+            justify-content: flex-end;
+            padding: 2px 8px;
+        }
+        .expand-collapse-bar button {
+            font-size: 0.6rem; padding: 2px 8px; border: 1px solid #d1d5db;
+            border-radius: 4px; background: white; cursor: pointer; color: #64748b; font-weight: 600;
+        }
+        .expand-collapse-bar button:hover { background: #f1f5f9; }
+
+        /* Autocomplete dropdown */
+        .autocomplete-wrapper { position: relative; }
+        .autocomplete-dropdown {
+            display: none;
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: white;
+            border: 1px solid #d1d5db;
+            border-radius: 0 0 8px 8px;
+            max-height: 180px;
+            overflow-y: auto;
+            z-index: 50;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        .autocomplete-item {
+            padding: 8px 12px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            border-bottom: 1px solid #f1f5f9;
+        }
+        .autocomplete-item:hover { background: #f0f7ff; }
+
+        /* DETAILS TAB */
+        .details-form {
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            overflow-y: auto;
+            flex: 1;
+        }
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .form-group label {
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .form-group input, .form-group select {
+            padding: 10px 12px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            background: white;
+            color: #333;
+            transition: 0.2s;
+        }
+        .form-group input:focus, .form-group select:focus {
+            outline: none;
+            border-color: var(--info);
+            box-shadow: 0 0 0 3px rgba(59,130,246,0.1);
+        }
+
+        .toggle-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 0;
+        }
+        .toggle-row label {
+            font-size: 0.85rem;
+            font-weight: 700;
+            color: #374151;
+        }
+        .toggle-switch {
+            position: relative;
+            width: 48px;
+            height: 26px;
+            cursor: pointer;
+        }
+        .toggle-switch input { display: none; }
+        .toggle-slider {
+            position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+            background: #cbd5e1;
+            border-radius: 26px;
+            transition: 0.3s;
+        }
+        .toggle-slider::before {
+            content: '';
+            position: absolute;
+            width: 20px; height: 20px;
+            left: 3px; bottom: 3px;
+            background: white;
+            border-radius: 50%;
+            transition: 0.3s;
+        }
+        .toggle-switch input:checked + .toggle-slider { background: var(--success); }
+        .toggle-switch input:checked + .toggle-slider::before { transform: translateX(22px); }
+
+        /* MY GAMES TAB */
+        .my-games-panel {
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            overflow: hidden;
+        }
+        .my-games-header {
+            padding: 12px 15px;
+            background: #f8fafc;
+            border-bottom: 1px solid #e2e8f0;
+            flex-shrink: 0;
+        }
+        .my-games-header .count-text {
+            font-size: 0.8rem;
+            font-weight: 700;
+            color: #64748b;
+        }
+        .my-games-header .count-number {
+            color: var(--primary);
+            font-weight: 900;
+        }
+        .search-bar {
+            margin-top: 8px;
+        }
+        .search-bar input {
+            width: 100%;
+            padding: 9px 12px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            background: white;
+        }
+        .search-bar input:focus { outline: none; border-color: var(--info); }
+
+        .games-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px;
+        }
+
+        .game-card {
+            background: white;
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+            padding: 12px;
+            margin-bottom: 10px;
+            transition: 0.2s;
+            cursor: default;
+        }
+        .game-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.08); border-color: #cbd5e1; }
+
+        .game-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 6px;
+        }
+        .game-card-players {
+            font-weight: 700;
+            font-size: 0.85rem;
+            color: #1e293b;
+        }
+        .game-card-players .vs { color: #94a3b8; font-weight: 400; margin: 0 4px; }
+
+        .result-badge {
+            padding: 2px 8px;
+            border-radius: 6px;
+            font-size: 0.65rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .result-red-win { background: #fef2f2; color: var(--primary); border: 1px solid #fecaca; }
+        .result-black-win { background: #f1f5f9; color: #1e293b; border: 1px solid #cbd5e1; }
+        .result-draw { background: #f0fdf4; color: var(--success); border: 1px solid #bbf7d0; }
+        .result-no-result { background: #f8fafc; color: #94a3b8; border: 1px solid #e2e8f0; }
+
+        .game-card-meta {
+            font-size: 0.72rem;
+            color: #94a3b8;
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .game-card-actions {
+            display: flex;
+            gap: 6px;
+        }
+        .game-card-actions button {
+            padding: 5px 10px;
+            border-radius: 6px;
+            border: 1px solid #e2e8f0;
+            background: white;
+            font-size: 0.72rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: 0.2s;
+            color: #475569;
+        }
+        .game-card-actions button:hover { background: #f1f5f9; }
+        .game-card-actions .btn-load { color: var(--info); border-color: var(--info); }
+        .game-card-actions .btn-load:hover { background: #eff6ff; }
+        .game-card-actions .btn-delete { color: #ef4444; border-color: #ef4444; }
+        .game-card-actions .btn-delete:hover { background: #fef2f2; }
+        .game-card-actions .btn-toggle-vis { color: var(--success); border-color: var(--success); }
+        .game-card-actions .btn-toggle-vis:hover { background: #f0fdf4; }
+        .game-card-actions .btn-export { color: #8b5cf6; border-color: #8b5cf6; }
+        .game-card-actions .btn-export:hover { background: #f5f3ff; }
+
+        .game-card-opening {
+            font-weight: 800;
+            font-size: 0.9rem;
+            color: #1e293b;
+            margin-bottom: 2px;
+        }
+        .game-card-title {
+            font-weight: 600;
+            font-size: 0.75rem;
+            color: #64748b;
+            margin-bottom: 4px;
+            padding-bottom: 4px;
+            border-bottom: 1px solid #f1f5f9;
+        }
+
+        .visibility-icon { font-size: 0.7rem; }
+
+        .view-toggle { display: flex; gap: 4px; margin-bottom: 10px; background: #e5e7eb; padding: 3px; border-radius: 8px; }
+        .view-toggle-btn { flex: 1; padding: 8px; border: none; border-radius: 6px; background: transparent; color: #64748b; font-weight: 700; font-size: 0.8rem; cursor: pointer; transition: 0.2s; }
+        .view-toggle-btn.active { background: white; color: var(--primary); box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .view-toggle-btn:hover:not(.active) { color: #374151; }
+
+        .voting-ui { display: flex; gap: 8px; margin: 8px 0 0; padding-top: 8px; border-top: 1px solid #f1f5f9; }
+        .vote-btn { flex: 1; padding: 6px; border: 2px solid #e2e8f0; border-radius: 8px; background: white; color: #64748b; font-size: 0.8rem; font-weight: 700; cursor: pointer; transition: 0.2s; display: flex; align-items: center; justify-content: center; gap: 4px; }
+        .vote-btn:hover { background: #f8fafc; }
+        .vote-btn.voted-up { background: #eff6ff; color: #3b82f6; border-color: #3b82f6; }
+        .vote-btn.voted-down { background: #fef2f2; color: #ef4444; border-color: #ef4444; }
+        .vote-count-display { display: flex; gap: 12px; margin: 6px 0 0; font-size: 0.75rem; color: #94a3b8; }
+
+        .pagination-controls { display: flex; justify-content: space-between; align-items: center; padding: 12px 10px; margin-top: 10px; border-top: 1px solid #e2e8f0; }
+        .page-btn { padding: 8px 16px; border: 1px solid #d1d5db; border-radius: 8px; background: white; color: #374151; font-weight: 700; font-size: 0.8rem; cursor: pointer; transition: 0.2s; }
+        .page-btn:hover:not(:disabled) { background: #f3f4f6; border-color: var(--info); }
+        .page-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .page-info { font-size: 0.85rem; color: #64748b; font-weight: 600; }
+
+        .game-card-creator { font-size: 0.7rem; color: #94a3b8; margin-bottom: 4px; }
+        .game-card-creator .creator-name { color: #6366f1; font-weight: 700; }
+
+        /* Sidebar Action Buttons */
+        .sidebar-actions {
+            padding: 12px 15px;
+            border-top: 1px solid #e2e8f0;
+            background: #f8fafc;
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .btn-save-game {
+            width: 100%;
+            padding: 12px;
+            border-radius: 8px;
+            border: none;
+            font-weight: 900;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: 0.2s;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            background: var(--primary);
+            color: white;
+        }
+        .btn-save-game:hover { filter: brightness(1.1); transform: translateY(-1px); }
+
+        .btn-export-game {
+            width: 100%;
+            padding: 10px;
+            border-radius: 8px;
+            border: 2px solid #8b5cf6;
+            font-weight: 800;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: 0.2s;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            background: white;
+            color: #8b5cf6;
+        }
+        .btn-export-game:hover { background: #f5f3ff; transform: translateY(-1px); }
+
+        .btn-variation {
+            width: 100%;
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid var(--gold);
+            font-weight: 700;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: 0.2s;
+            background: #fffbeb;
+            color: #92400e;
+        }
+        .btn-variation:hover { background: #fef3c7; }
+
+        .variation-recording-indicator {
+            display: none;
+            padding: 8px 12px;
+            background: #fef3c7;
+            border: 2px solid var(--gold);
+            border-radius: 8px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            color: #92400e;
+            text-align: center;
+        }
+        .variation-recording-indicator.active { display: block; }
+
+        .variation-end-controls {
+            display: none;
+            gap: 6px;
+        }
+        .variation-end-controls.active { display: flex; }
+        .variation-end-controls input {
+            flex: 1;
+            padding: 8px 10px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 0.8rem;
+        }
+        .variation-end-controls button {
+            padding: 8px 14px;
+            border-radius: 6px;
+            border: none;
+            font-weight: 700;
+            font-size: 0.75rem;
+            cursor: pointer;
+            background: var(--success);
+            color: white;
+        }
+
+        .btn-back-main-line {
+            display: none;
+            width: 100%;
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid var(--info);
+            font-weight: 700;
+            font-size: 0.8rem;
+            cursor: pointer;
+            background: #eff6ff;
+            color: var(--info);
+            text-align: center;
+        }
+        .btn-variation-undo {
+            display: none;
+            width: 100%;
+            padding: 8px;
+            background: #fee2e2;
+            border: 2px solid #ef4444;
+            border-radius: 8px;
+            color: #b91c1c;
+            font-weight: 700;
+            cursor: pointer;
+            font-size: 0.8rem;
+        }
+        .btn-variation-undo:hover { background: #fecaca; }
+
+        /* Turn indicator */
+        .turn-indicator {
+            text-align: center;
+            margin-bottom: 6px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            padding: 4px 12px;
+            border-radius: 6px;
+            display: inline-block;
+        }
+        .turn-red { background: #fef2f2; color: var(--primary); border: 1px solid #fecaca; }
+        .turn-black { background: #f1f5f9; color: #1e293b; border: 1px solid #cbd5e1; }
+
+        /* Loading overlay */
+        #loader {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(240,242,245,0.95); z-index: 9999;
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+        }
+        .spin {
+            width: 40px; height: 40px; border: 4px solid #e2e8f0;
+            border-top-color: var(--primary); border-radius: 50%;
+            animation: s 1s linear infinite;
+        }
+        @keyframes s { to { transform: rotate(360deg); } }
+
+        /* Toast messages */
+        .toast {
+            position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+            padding: 12px 24px; border-radius: 10px; z-index: 10000;
+            font-weight: 700; font-size: 0.85rem; color: white;
+            box-shadow: 0 6px 20px rgba(0,0,0,0.2);
+            animation: toastIn 0.3s ease;
+            pointer-events: none;
+        }
+        .toast-success { background: var(--success); }
+        .toast-error { background: #ef4444; }
+        .toast-info { background: var(--info); }
+        @keyframes toastIn { from { opacity: 0; transform: translateX(-50%) translateY(20px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }
+
+        /* Confirm dialog */
+        .confirm-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.5); z-index: 9998;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .confirm-dialog {
+            background: white; padding: 24px; border-radius: 12px;
+            max-width: 400px; width: 90%; text-align: center;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+        }
+        .confirm-dialog h3 { margin-bottom: 10px; color: #1e293b; }
+        .confirm-dialog p { margin-bottom: 20px; color: #64748b; font-size: 0.9rem; }
+        .confirm-dialog .btn-row { display: flex; gap: 10px; justify-content: center; }
+        .confirm-dialog button {
+            padding: 10px 24px; border-radius: 8px; border: none;
+            font-weight: 700; cursor: pointer; font-size: 0.85rem;
+        }
+        .confirm-dialog .btn-confirm { background: #ef4444; color: white; }
+        .confirm-dialog .btn-cancel { background: #e2e8f0; color: #475569; }
+    </style>
+</head>
+<body>
+
+<div id="loader">
+    <div class="spin"></div>
+    <p style="margin-top:20px; color:var(--primary); font-weight:bold; letter-spacing:1px;">Loading Knowledge Base...</p>
+</div>
+
+<header>
+    <h1>
+        <span>&#128218; Knowledge Base</span>
+        <span class="game-count-badge" id="game-count-badge">0 games</span>
+    </h1>
+    <a href="../lobby/lobby.html" class="btn-back">&#8592; Back to Lobby</a>
+</header>
+
+<div class="main-layout">
+    <!-- LEFT: Board Area -->
+    <div class="board-area">
+        <div style="text-align:center; margin-bottom:6px;">
+            <span class="turn-indicator turn-red" id="turn-indicator">Red to move</span>
+        </div>
+        <div class="board-and-comment">
+            <div class="board-column">
+                <div class="board-container" id="board-container">
+                    <svg id="board-svg" viewBox="0 0 100 110" preserveAspectRatio="xMidYMid meet">
+                        <g stroke="var(--board-line)" stroke-width="0.4">
+                            <line x1="10" y1="10" x2="90" y2="10" />
+                            <line x1="10" y1="20" x2="90" y2="20" />
+                            <line x1="10" y1="30" x2="90" y2="30" />
+                            <line x1="10" y1="40" x2="90" y2="40" />
+                            <line x1="10" y1="50" x2="90" y2="50" />
+                            <line x1="10" y1="60" x2="90" y2="60" />
+                            <line x1="10" y1="70" x2="90" y2="70" />
+                            <line x1="10" y1="80" x2="90" y2="80" />
+                            <line x1="10" y1="90" x2="90" y2="90" />
+                            <line x1="10" y1="100" x2="90" y2="100" />
+                        </g>
+                        <g stroke="var(--board-line)" stroke-width="0.4">
+                            <line x1="10" y1="10" x2="10" y2="100" />
+                            <line x1="20" y1="10" x2="20" y2="50" /><line x1="20" y1="60" x2="20" y2="100" />
+                            <line x1="30" y1="10" x2="30" y2="50" /><line x1="30" y1="60" x2="30" y2="100" />
+                            <line x1="40" y1="10" x2="40" y2="50" /><line x1="40" y1="60" x2="40" y2="100" />
+                            <line x1="50" y1="10" x2="50" y2="50" /><line x1="50" y1="60" x2="50" y2="100" />
+                            <line x1="60" y1="10" x2="60" y2="50" /><line x1="60" y1="60" x2="60" y2="100" />
+                            <line x1="70" y1="10" x2="70" y2="50" /><line x1="70" y1="60" x2="70" y2="100" />
+                            <line x1="80" y1="10" x2="80" y2="50" /><line x1="80" y1="60" x2="80" y2="100" />
+                            <line x1="90" y1="10" x2="90" y2="100" />
+                        </g>
+                        <g stroke="var(--board-line)" stroke-width="0.4">
+                            <line x1="40" y1="10" x2="60" y2="30" />
+                            <line x1="60" y1="10" x2="40" y2="30" />
+                            <line x1="40" y1="80" x2="60" y2="100" />
+                            <line x1="60" y1="80" x2="40" y2="100" />
+                        </g>
+                        <g font-family="serif" font-weight="900" font-size="4.5" fill="var(--board-line)" opacity="0.7">
+                            <text x="30" y="56.5" text-anchor="middle">&#26970; &#27827;</text>
+                            <text x="70" y="56.5" text-anchor="middle">&#28450; &#30028;</text>
+                        </g>
+                        <rect x="10" y="10" width="80" height="90" fill="none" stroke="var(--board-line)" stroke-width="1.2" />
+                        <g font-size="3.5" fill="var(--board-line)" font-weight="bold" text-anchor="middle">
+                            <text x="10" y="6.5">1</text><text x="20" y="6.5">2</text><text x="30" y="6.5">3</text>
+                            <text x="40" y="6.5">4</text><text x="50" y="6.5">5</text><text x="60" y="6.5">6</text>
+                            <text x="70" y="6.5">7</text><text x="80" y="6.5">8</text><text x="90" y="6.5">9</text>
+                            <text x="10" y="106.8">&#20061;</text><text x="20" y="106.8">&#20843;</text><text x="30" y="106.8">&#19971;</text>
+                            <text x="40" y="106.8">&#20845;</text><text x="50" y="106.8">&#20116;</text><text x="60" y="106.8">&#22235;</text>
+                            <text x="70" y="106.8">&#19977;</text><text x="80" y="106.8">&#20108;</text><text x="90" y="106.8">&#19968;</text>
+                        </g>
+                    </svg>
+                    <div id="hints-layer"></div>
+                    <div id="pieces-layer"></div>
+                </div>
+                <div class="board-controls">
+                    <div class="nav-buttons">
+                        <button class="nav-btn" id="btn-first" title="First move">&#9198;</button>
+                        <button class="nav-btn" id="btn-prev" title="Previous move">&#9664;</button>
+                        <button class="nav-btn" id="btn-next" title="Next move">&#9654;</button>
+                        <button class="nav-btn" id="btn-last" title="Last move">&#9197;</button>
+                        <button class="nav-btn" id="btn-undo" title="Undo last move">&#8617;</button>
+                        <button class="nav-btn" id="btn-flip" title="Flip board">🔄</button>
+                        <button class="nav-btn" id="btn-rotate" title="Rotate board 90°">↻</button>
+                        <button class="nav-btn" id="btn-new" title="New game">&#127382;</button>
+                    </div>
+                </div>
+            </div>
+            <div class="comment-area">
+                <div class="comment-label" id="comment-label">Move comment</div>
+                <textarea id="comment-input" placeholder="Add a comment for this move..."></textarea>
+            </div>
+        </div>
+    </div>
+
+    <!-- RIGHT: Sidebar -->
+    <div class="sidebar">
+        <div class="sidebar-tabs">
+            <button class="sidebar-tab active" data-tab="moves">MOVES</button>
+            <button class="sidebar-tab" data-tab="details">DETAILS</button>
+            <button class="sidebar-tab" data-tab="mygames">MY GAMES</button>
+        </div>
+
+        <!-- MOVES TAB -->
+        <div class="tab-content active" id="tab-moves">
+            <div class="moves-grid">
+                <div class="expand-collapse-bar">
+                    <button id="btn-swap-notation" title="Toggle between Chinese and English notation">EN⇄中</button>
+                    <button id="btn-expand-all" title="Expand all variations">Expand All</button>
+                    <button id="btn-collapse-all" title="Collapse all variations">Collapse All</button>
+                </div>
+                <div class="moves-header">
+                    <span>#</span>
+                    <span style="color:var(--primary);">Red</span>
+                    <span>Black</span>
+                </div>
+                <div id="moves-list">
+                    <div style="text-align:center; color:#94a3b8; padding:30px 10px; font-size:0.85rem;">No moves yet. Click pieces to start recording.</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- DETAILS TAB -->
+        <div class="tab-content" id="tab-details">
+            <div class="details-form" id="details-form">
+                <div class="form-group">
+                    <label>Game Title / Filename</label>
+                    <input type="text" id="input-game-title" placeholder="e.g. My Opening Study 01">
+                </div>
+                <div class="form-group">
+                    <label>Red Player Name</label>
+                    <input type="text" id="input-red-player" placeholder="Red player name">
+                </div>
+                <div class="form-group">
+                    <label>Black Player Name</label>
+                    <input type="text" id="input-black-player" placeholder="Black player name">
+                </div>
+                <div class="form-group">
+                    <label>Date Played</label>
+                    <input type="date" id="input-date">
+                </div>
+                <div class="form-group">
+                    <label>Location</label>
+                    <input type="text" id="input-location" placeholder="e.g. Singapore, Online">
+                </div>
+                <div class="form-group">
+                    <label>Result</label>
+                    <select id="input-result">
+                        <option value="no-result">No Result</option>
+                        <option value="red-win">Red Win</option>
+                        <option value="black-win">Black Win</option>
+                        <option value="draw">Draw</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Opening Name</label>
+                    <div class="autocomplete-wrapper">
+                        <input type="text" id="input-opening" placeholder="e.g. Central Cannon" autocomplete="off">
+                        <div class="autocomplete-dropdown" id="opening-suggestions"></div>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Keyword 1</label>
+                    <input type="text" id="input-kw1" placeholder="Keyword">
+                </div>
+                <div class="form-group">
+                    <label>Keyword 2</label>
+                    <input type="text" id="input-kw2" placeholder="Keyword">
+                </div>
+                <div class="form-group">
+                    <label>Keyword 3</label>
+                    <input type="text" id="input-kw3" placeholder="Keyword">
+                </div>
+                <div class="toggle-row">
+                    <label>Public (visible to all)</label>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="input-public">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        <!-- MY GAMES TAB -->
+        <div class="tab-content" id="tab-mygames">
+            <div class="my-games-panel">
+                <div class="my-games-header">
+                    <div class="view-toggle">
+                        <button class="view-toggle-btn active" id="btn-view-mine" data-view="mine">My Games</button>
+                        <button class="view-toggle-btn" id="btn-view-public" data-view="public">Public Games</button>
+                    </div>
+                    <div class="count-text"><span id="view-count-label">You have</span> <span class="count-number" id="my-games-count">0</span> <span id="view-count-unit">games</span></div>
+                    <div class="search-bar">
+                        <input type="text" id="search-games" placeholder="Search by keyword, player, opening...">
+                    </div>
+                </div>
+                <div class="games-list" id="games-list">
+                    <div style="text-align:center; color:#94a3b8; padding:30px 10px; font-size:0.85rem;">Loading your games...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sidebar Actions -->
+        <div class="sidebar-actions">
+            <div class="variation-recording-indicator" id="variation-indicator">
+                &#128256; Recording Variation at Move <span id="variation-at-move">0</span>
+            </div>
+            <div class="variation-end-controls" id="variation-end-controls">
+                <input type="text" id="variation-label-input" placeholder="Variation name...">
+                <button id="btn-end-variation">Save</button>
+            </div>
+            <button class="btn-back-main-line" id="btn-back-main-line">&#8592; Back to Main Line</button>
+            <button class="btn-variation-undo" id="btn-undo-var-move">&#9100; Undo Last 变 Move</button>
+            <button class="btn-variation" id="btn-add-variation">Add Variation</button>
+            <button class="btn-save-game" id="btn-save-game">&#128190; SAVE GAME</button>
+            <button class="btn-export-game" id="btn-export-game">&#128229; EXPORT PGN</button>
+        </div>
+    </div>
+</div>
+
+<script type="module">
+import { XQEngine } from "./xq-engine.js?v=206";
+import { XQUI } from "./xq-ui.js";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
+import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
+import { getFirestore, doc, getDoc, setDoc, addDoc, deleteDoc, collection, query, where, getDocs, arrayUnion, arrayRemove } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
+
+const firebaseConfig = {
+    apiKey: "AIzaSyDq_LECOrc4SY90SyDsBQGmwl-YnUNFIj8",
+    authDomain: "xiangqi-sq.firebaseapp.com",
+    projectId: "xiangqi-sq",
+    storageBucket: "xiangqi-sq.firebasestorage.app",
+    messagingSenderId: "351923336298",
+    appId: "1:351923336298:web:e7278ea095ba085ac4935b"
+};
+const appId = 'sg-xiangqi';
+
+const fbApp = initializeApp(firebaseConfig);
+const auth = getAuth(fbApp);
+const db = getFirestore(fbApp);
+
+const engine = new XQEngine();
+const ui = new XQUI();
+
+/* ===== Board Themes ===== */
+const boardThemes = {
+    classic:  { bg: '#dcb35c', line: '#5d2e0c', border: '#2a1a10' },
+    emerald:  { bg: '#065f46', line: '#a7f3d0', border: '#022c22' },
+    slate:    { bg: '#334155', line: '#94a3b8', border: '#0f172a' },
+    mahogany: { bg: '#7c2d12', line: '#fed7aa', border: '#431407' },
+    bamboo:   { bg: '#c2b280', line: '#4a3728', border: '#3b2f1e' },
+    stone:    { bg: '#6b7280', line: '#e5e7eb', border: '#374151' },
+    cyber:    { bg: '#0a0a0a', line: '#00ff88', border: '#003322' },
+    cherry:   { bg: '#881337', line: '#fda4af', border: '#4c0519' }
+};
+
+/* ===== Application State ===== */
+let currentUser = null;
+let userProfile = null;
+let pieceSet = 'ivory';
+let boardSet = 'classic';
+
+let board = engine.init();
+let moves = [];           // Array of {from:{x,y}, to:{x,y}, piece:string, captured:string|null}
+let movesICCS = [];
+let movesChinese = [];
+let currentMoveIndex = -1; // -1 = initial position, 0 = after first move...
+let currentTurn = 'red';
+let selectedPiece = null;
+let lastMove = null;
+
+let comments = {};         // { "0": "Opening move", "3": "Critical!", ... }
+let variations = {};       // { "2": [{moves:[], label:"Alt line", movesICCS:[], movesChinese:[]}], ... }
+
+let isRecordingVariation = false;
+let variationStartIndex = -1;
+let variationMoves = [];
+let variationMovesICCS = [];
+let variationMovesChinese = [];
+let viewingVariation = null;  // { path: [{moveIndex, varIndex}], moveWithin: number }
+let variationRecordingContext = null; // { parentPath: [...], startMoveWithin: number } for sub-variations
+
+let boardFlipped = false;  // When true, black side faces the player
+let boardRotated = false;  // When true, board is rotated 90 degrees clockwise
+
+let loadedGameId = null;
+let loadedGameCreator = null; // UID of the loaded game's creator
+let allMyGames = [];
+let allPublicGames = [];
+let currentGamesView = 'mine'; // 'mine' | 'public'
+let currentPage = 1;
+const gamesPerPage = 20;
+let notationMode = 'english'; // 'english' | 'chinese'
+
+function isGameOwner() {
+    return !loadedGameCreator || (currentUser && loadedGameCreator === currentUser.uid);
+}
+
+function toChineseNotation(eng, isRedMove) {
+    if (!eng || eng.length < 4) return eng;
+    const redPieces = { 'R':'车','H':'马','E':'相','A':'仕','K':'帅','C':'炮','P':'兵' };
+    const blackPieces = { 'R':'车','H':'马','E':'象','A':'士','K':'将','C':'炮','P':'卒' };
+    const chNums = ['','一','二','三','四','五','六','七','八','九'];
+    const dirMap = { '.':'平', '+':'进', '-':'退' };
+
+    const pieceChar = eng[0];
+    const srcFile = eng[1];
+    const dir = eng[2];
+    const dest = eng.substring(3);
+
+    const pMap = isRedMove ? redPieces : blackPieces;
+    const pCn = pMap[pieceChar] || pieceChar;
+    const dirCn = dirMap[dir] || dir;
+
+    if (isRedMove) {
+        const srcCn = chNums[parseInt(srcFile)] || srcFile;
+        const destCn = chNums[parseInt(dest)] || dest;
+        return pCn + srcCn + dirCn + destCn;
+    } else {
+        return pCn + srcFile + dirCn + dest;
+    }
+}
+
+function getNotation(idx) {
+    const eng = movesChinese[idx] || movesICCS[idx] || '...';
+    if (notationMode === 'english') return eng;
+    const isRedMove = idx % 2 === 0;
+    return toChineseNotation(eng, isRedMove);
+}
+
+function getVarNotation(eng, parentMoveIdx, mi) {
+    if (notationMode === 'english') return eng;
+    // Determine if this variation move is red or black:
+    // parentMoveIdx is the main line move it branches from
+    // The variation starts as the alternative to that move, so first var move has same color
+    const parentIsRed = parseInt(parentMoveIdx) % 2 === 0;
+    const isRedMove = (mi % 2 === 0) ? parentIsRed : !parentIsRed;
+    return toChineseNotation(eng, isRedMove);
+}
+
+function getVarNotations(v) {
+    return v.movesChinese && v.movesChinese.length > 0 ? v.movesChinese : (v.movesICCS || []);
+}
+
+function toggleNotation() {
+    notationMode = notationMode === 'chinese' ? 'english' : 'chinese';
+    document.getElementById('btn-swap-notation').textContent = notationMode === 'chinese' ? '中⇄EN' : 'EN⇄中';
+    renderMovesListWithExpansion();
+}
+
+/* ===== Move Notation ===== */
+function formatMoveNotation(board, from, to, piece) {
+    const isRed = piece === piece.toUpperCase();
+    const pieceMap = { 'r':'R','n':'H','e':'E','a':'A','k':'K','c':'C','p':'P',
+                       'R':'R','N':'H','E':'E','A':'A','K':'K','C':'C','P':'P' };
+    const pChar = pieceMap[piece] || '?';
+
+    let sourceFile, targetFile;
+    if (isRed) {
+        sourceFile = 9 - from.x;
+        targetFile = 9 - to.x;
+    } else {
+        sourceFile = from.x + 1;
+        targetFile = to.x + 1;
+    }
+
+    const dy = to.y - from.y;
+    let direction, dest;
+
+    if (dy === 0) {
+        direction = '.';
+        dest = targetFile;
+    } else {
+        const isForward = isRed ? (dy < 0) : (dy > 0);
+        direction = isForward ? '+' : '-';
+
+        const lowerP = piece.toLowerCase();
+        if (lowerP === 'h' || lowerP === 'n' || lowerP === 'e' || lowerP === 'a') {
+            dest = targetFile;
+        } else {
+            dest = Math.abs(dy);
+        }
+    }
+
+    return pChar + sourceFile + direction + dest;
+}
+
+function moveToICCS(from, to) {
+    const files = ['a','b','c','d','e','f','g','h','i'];
+    return files[from.x] + (9 - from.y) + files[to.x] + (9 - to.y);
+}
+
+/* ===== Board Style ===== */
+function applyBoardStyle(theme) {
+    const t = boardThemes[theme] || boardThemes.classic;
+    const container = document.getElementById('board-container');
+    container.style.background = t.bg;
+    container.style.borderColor = t.border;
+    document.documentElement.style.setProperty('--board-line', t.line);
+    document.documentElement.style.setProperty('--board-bg', t.bg);
+    document.documentElement.style.setProperty('--board-border', t.border);
+    ui.drawGrid('board-svg', t.line);
+}
+
+/* ===== Board Flip Helper ===== */
+function flipBoard(b) {
+    return b.slice().reverse().map(row => row.slice().reverse());
+}
+
+function updateBoardSVG() {
+    const svg = document.getElementById('board-svg');
+    if (!svg) return;
+
+    if (boardRotated) {
+        // Rotated 90° CW: original grid (col 0-8, row 0-9) maps to:
+        //   SVG x = 10 + row * 10  (row 0..9 → x 10..100)
+        //   SVG y = 10 + (8-col) * 10  (col 0 → y=90, col 8 → y=10)
+        // ViewBox: 110 wide × 100 tall
+        svg.setAttribute('viewBox', '0 0 110 100');
+        const s = 'var(--board-line)';
+        let svgContent = '';
+
+        // Border
+        svgContent += `<rect x="10" y="10" width="90" height="80" fill="none" stroke="${s}" stroke-width="1.2" />`;
+
+        // Vertical lines (10 lines for rows 0-9, all full height)
+        svgContent += `<g stroke="${s}" stroke-width="0.4">`;
+        for (let row = 0; row <= 9; row++) {
+            const x = 10 + row * 10;
+            svgContent += `<line x1="${x}" y1="10" x2="${x}" y2="90" />`;
+        }
+        svgContent += '</g>';
+
+        // Horizontal lines (9 lines for cols 0-8)
+        // Edge lines (col 0 → y=90, col 8 → y=10) go full width
+        // Inner lines (cols 1-7) break at river (between x=50 and x=60)
+        svgContent += `<g stroke="${s}" stroke-width="0.4">`;
+        for (let col = 0; col <= 8; col++) {
+            const y = 10 + (8 - col) * 10;
+            if (col === 0 || col === 8) {
+                svgContent += `<line x1="10" y1="${y}" x2="100" y2="${y}" />`;
+            } else {
+                svgContent += `<line x1="10" y1="${y}" x2="50" y2="${y}" />`;
+                svgContent += `<line x1="60" y1="${y}" x2="100" y2="${y}" />`;
+            }
+        }
+        svgContent += '</g>';
+
+        // Palace diagonals
+        // Top palace: col 3-5, row 0-2 → rotated corners:
+        //   (3,0)→(10,60), (5,0)→(10,40), (3,2)→(30,60), (5,2)→(30,40)
+        // Bottom palace: col 3-5, row 7-9 → rotated corners:
+        //   (3,7)→(80,60), (5,7)→(80,40), (3,9)→(100,60), (5,9)→(100,40)
+        svgContent += `<g stroke="${s}" stroke-width="0.4">`;
+        svgContent += `<line x1="10" y1="40" x2="30" y2="60" />`;
+        svgContent += `<line x1="10" y1="60" x2="30" y2="40" />`;
+        svgContent += `<line x1="80" y1="40" x2="100" y2="60" />`;
+        svgContent += `<line x1="80" y1="60" x2="100" y2="40" />`;
+        svgContent += '</g>';
+
+        // River text (in the vertical river gap between x=50 and x=60)
+        svgContent += `<g font-family="serif" font-weight="900" font-size="4.5" fill="${s}" opacity="0.7">`;
+        svgContent += `<text x="55" y="32" text-anchor="middle" writing-mode="tb" glyph-orientation-vertical="0" letter-spacing="3">楚河</text>`;
+        svgContent += `<text x="55" y="62" text-anchor="middle" writing-mode="tb" glyph-orientation-vertical="0" letter-spacing="3">漢界</text>`;
+        svgContent += '</g>';
+
+        // Intersection markers
+        let markers = '';
+        const drawRotMarker = (col, row) => {
+            const cx = 10 + row * 10, cy = 10 + (8 - col) * 10;
+            const g = 0.6, l = 0.4;
+            let m = '';
+            const isLeft = (row === 0), isRight = (row === 9);
+            const isTop = (col === 8), isBot = (col === 0);
+            if (!isLeft) {
+                m += `<line x1="${cx-g-l}" y1="${cy-g}" x2="${cx-g}" y2="${cy-g}" stroke="${s}" stroke-width="0.4"/>`;
+                m += `<line x1="${cx-g}" y1="${cy-g-l}" x2="${cx-g}" y2="${cy-g}" stroke="${s}" stroke-width="0.4"/>`;
+                m += `<line x1="${cx-g-l}" y1="${cy+g}" x2="${cx-g}" y2="${cy+g}" stroke="${s}" stroke-width="0.4"/>`;
+                m += `<line x1="${cx-g}" y1="${cy+g}" x2="${cx-g}" y2="${cy+g+l}" stroke="${s}" stroke-width="0.4"/>`;
+            }
+            if (!isRight) {
+                m += `<line x1="${cx+g}" y1="${cy-g}" x2="${cx+g+l}" y2="${cy-g}" stroke="${s}" stroke-width="0.4"/>`;
+                m += `<line x1="${cx+g}" y1="${cy-g-l}" x2="${cx+g}" y2="${cy-g}" stroke="${s}" stroke-width="0.4"/>`;
+                m += `<line x1="${cx+g}" y1="${cy+g}" x2="${cx+g+l}" y2="${cy+g}" stroke="${s}" stroke-width="0.4"/>`;
+                m += `<line x1="${cx+g}" y1="${cy+g}" x2="${cx+g}" y2="${cy+g+l}" stroke="${s}" stroke-width="0.4"/>`;
+            }
+            return m;
+        };
+        // Cannon positions: (col,row) = (2,1),(7,1),(2,7),(7,7)
+        [[2,1],[7,1],[2,7],[7,7]].forEach(([c,r]) => markers += drawRotMarker(c, r));
+        // Pawn positions: (col,row) = (3,0),(3,2),(3,4),(3,6),(3,8),(6,0),(6,2),(6,4),(6,6),(6,8)
+        [0,2,4,6,8].forEach(r => [3,6].forEach(c => markers += drawRotMarker(c, r)));
+        svgContent += markers;
+
+        // Coordinate numbers along left (black) and right (red) sides
+        svgContent += `<g font-size="3.5" fill="${s}" font-weight="bold" text-anchor="middle">`;
+        // Black numbers (1-9) on left side at x=6, for cols 8→0 (y=10→90)
+        for (let col = 8; col >= 0; col--) {
+            const y = 10 + (8 - col) * 10;
+            svgContent += `<text x="6" y="${y + 1.5}">${col + 1}</text>`;
+        }
+        // Red Chinese numbers on right side at x=106
+        const chNums = ['','一','二','三','四','五','六','七','八','九'];
+        for (let col = 8; col >= 0; col--) {
+            const y = 10 + (8 - col) * 10;
+            svgContent += `<text x="106" y="${y + 1.5}">${chNums[9 - col]}</text>`;
+        }
+        svgContent += '</g>';
+
+        svg.innerHTML = svgContent;
+    } else {
+        // Normal view: restore original SVG
+        let svgContent = '';
+
+        // Horizontal lines
+        svgContent += '<g stroke="var(--board-line)" stroke-width="0.4">';
+        for (let i = 0; i < 10; i++) {
+            svgContent += `<line x1="10" y1="${10 + i * 10}" x2="90" y2="${10 + i * 10}" />`;
+        }
+        svgContent += '</g>';
+
+        // Vertical lines with river break
+        svgContent += '<g stroke="var(--board-line)" stroke-width="0.4">';
+        svgContent += `<line x1="10" y1="10" x2="10" y2="100" />`;
+        for (let i = 1; i <= 7; i++) {
+            svgContent += `<line x1="${10 + i * 10}" y1="10" x2="${10 + i * 10}" y2="50" />`;
+            svgContent += `<line x1="${10 + i * 10}" y1="60" x2="${10 + i * 10}" y2="100" />`;
+        }
+        svgContent += `<line x1="90" y1="10" x2="90" y2="100" />`;
+        svgContent += '</g>';
+
+        // Palace diagonals
+        svgContent += '<g stroke="var(--board-line)" stroke-width="0.4">';
+        svgContent += `<line x1="40" y1="10" x2="60" y2="30" />`;
+        svgContent += `<line x1="60" y1="10" x2="40" y2="30" />`;
+        svgContent += `<line x1="40" y1="80" x2="60" y2="100" />`;
+        svgContent += `<line x1="60" y1="80" x2="40" y2="100" />`;
+        svgContent += '</g>';
+
+        // River text
+        svgContent += '<g font-family="serif" font-weight="900" font-size="4.5" fill="var(--board-line)" opacity="0.7">';
+        svgContent += `<text x="30" y="56.5" text-anchor="middle">&#26970; &#27827;</text>`;
+        svgContent += `<text x="70" y="56.5" text-anchor="middle">&#28450; &#30028;</text>`;
+        svgContent += '</g>';
+
+        // Border
+        svgContent += `<rect x="10" y="10" width="80" height="90" fill="none" stroke="var(--board-line)" stroke-width="1.2" />`;
+
+        // Column numbers
+        svgContent += '<g font-size="3.5" fill="var(--board-line)" font-weight="bold" text-anchor="middle">';
+        const topNums = ['1','2','3','4','5','6','7','8','9'];
+        for (let i = 0; i < 9; i++) {
+            svgContent += `<text x="${10 + i * 10}" y="6.5">${topNums[i]}</text>`;
+        }
+        const botChars = ['&#20061;','&#20843;','&#19971;','&#20845;','&#20116;','&#22235;','&#19977;','&#20108;','&#19968;'];
+        for (let i = 0; i < 9; i++) {
+            svgContent += `<text x="${10 + i * 10}" y="106.8">${botChars[i]}</text>`;
+        }
+        svgContent += '</g>';
+
+        svg.setAttribute('viewBox', '0 0 100 110');
+        svg.innerHTML = svgContent;
+    }
+}
+
+function toDisplay(x, y) {
+    return boardFlipped ? { x: 8 - x, y: 9 - y } : { x, y };
+}
+
+function fromDisplay(dx, dy) {
+    return boardFlipped ? { x: 8 - dx, y: 9 - dy } : { x: dx, y: dy };
+}
+
+/* ===== Render Board ===== */
+function render() {
+    document.getElementById('board-container').classList.toggle('board-rotated', boardRotated);
+    updateBoardSVG();
+    const displayBoard = boardFlipped ? flipBoard(board) : board;
+    const displayLastMove = lastMove && boardFlipped ? {
+        from: toDisplay(lastMove.from.x, lastMove.from.y),
+        to: toDisplay(lastMove.to.x, lastMove.to.y)
+    } : lastMove;
+    const displaySelected = selectedPiece && boardFlipped
+        ? toDisplay(selectedPiece.x, selectedPiece.y)
+        : selectedPiece;
+
+    ui.renderPieces(displayBoard, engine.labels, handlePieceClickDisplay, pieceSet, displayLastMove, displaySelected, boardRotated);
+}
+
+function handlePieceClickDisplay(dx, dy) {
+    const actual = fromDisplay(dx, dy);
+    handlePieceClick(actual.x, actual.y);
+}
+
+function clearHints() {
+    document.getElementById('hints-layer').innerHTML = '';
+}
+
+function showHints(validMoves) {
+    const layer = document.getElementById('hints-layer');
+    layer.innerHTML = '';
+    validMoves.forEach(m => {
+        const d = toDisplay(m.x, m.y);
+        const el = document.createElement('div');
+        el.className = 'move-hint';
+        if (boardRotated) {
+            el.style.left = `${((10 + d.y * 10) / 110) * 100}%`;
+            el.style.top = `${10 + (8 - d.x) * 10}%`;
+        } else {
+            el.style.left = `${10 + d.x * 10}%`;
+            el.style.top = `${((10 + d.y * 10) / 110) * 100}%`;
+        }
+        el.style.pointerEvents = 'auto';
+        el.onclick = (e) => { e.stopPropagation(); handlePieceClick(m.x, m.y); };
+        layer.appendChild(el);
+    });
+}
+
+function updateTurnIndicator() {
+    const el = document.getElementById('turn-indicator');
+    if (currentTurn === 'red') {
+        el.textContent = 'Red to move';
+        el.className = 'turn-indicator turn-red';
+    } else {
+        el.textContent = 'Black to move';
+        el.className = 'turn-indicator turn-black';
+    }
+}
+
+/* ===== Piece Click Handler ===== */
+function handlePieceClick(x, y) {
+    if (!isGameOwner()) return; // Non-owners cannot make board moves
+
+    const piece = board[y][x];
+
+    // If we're navigating through history (not at the end), only allow new moves if we handle branching
+    if (!isRecordingVariation && !viewingVariation && currentMoveIndex < moves.length - 1) {
+        // We are in the middle of move history. Clicking means we want to potentially branch.
+        if (piece) {
+            const isRed = piece === piece.toUpperCase();
+            const expectedRed = currentTurn === 'red';
+            if (isRed === expectedRed) {
+                selectedPiece = { x, y };
+                clearHints();
+                const validMoves = engine.getValidMoves(board, x, y);
+                showHints(validMoves);
+                render();
+                return;
+            }
+        }
+        // Clicking on an enemy piece or empty spot while a piece is selected
+        if (selectedPiece) {
+            const hints = engine.getValidMoves(board, selectedPiece.x, selectedPiece.y);
+            const target = hints.find(h => h.x === x && h.y === y);
+            if (target) {
+                // Truncate future moves and record the new move here
+                moves = moves.slice(0, currentMoveIndex + 1);
+                movesICCS = movesICCS.slice(0, currentMoveIndex + 1);
+                movesChinese = movesChinese.slice(0, currentMoveIndex + 1);
+                // Clean up variations and comments that are beyond
+                const keysToRemove = [];
+                for (const key of Object.keys(variations)) {
+                    if (parseInt(key) > currentMoveIndex) keysToRemove.push(key);
+                }
+                keysToRemove.forEach(k => delete variations[k]);
+                for (const key of Object.keys(comments)) {
+                    if (parseInt(key) > currentMoveIndex) keysToRemove.push(key);
+                }
+                // Now execute the move
+                executeMove(x, y);
+                return;
+            }
+        }
+        return;
+    }
+
+    if (viewingVariation && !isRecordingVariation) {
+        // While viewing a variation, allow piece selection
+        if (piece) {
+            const isRed = piece === piece.toUpperCase();
+            const expectedRed = currentTurn === 'red';
+            if (isRed === expectedRed) {
+                selectedPiece = { x, y };
+                clearHints();
+                const validMoves = engine.getValidMoves(board, x, y);
+                showHints(validMoves);
+                render();
+                return;
+            }
+        }
+        if (selectedPiece) {
+            const validMoves = engine.getValidMoves(board, selectedPiece.x, selectedPiece.y);
+            const target = validMoves.find(m => m.x === x && m.y === y);
+            if (target) {
+                const v = resolveVariationPath(viewingVariation.path);
+                if (v && viewingVariation.moveWithin >= v.moves.length - 1) {
+                    // AT LAST MOVE — extend the variation directly
+                    const fromPos = { x: selectedPiece.x, y: selectedPiece.y };
+                    const toPos = { x, y };
+                    const movePiece = board[fromPos.y][fromPos.x];
+                    const captured = board[toPos.y][toPos.x];
+                    const moveObj = { from: fromPos, to: toPos, piece: movePiece, captured: captured };
+                    const iccs = moveToICCS(fromPos, toPos);
+                    const notation = formatMoveNotation(board, fromPos, toPos, movePiece);
+
+                    // Execute on board
+                    board[toPos.y][toPos.x] = movePiece;
+                    board[fromPos.y][fromPos.x] = null;
+
+                    // Push to variation
+                    v.moves.push(moveObj);
+                    v.movesICCS.push(iccs);
+                    v.movesChinese.push(notation);
+
+                    // Update state
+                    lastMove = moveObj;
+                    viewingVariation.moveWithin = v.moves.length - 1;
+                    currentTurn = currentTurn === 'red' ? 'black' : 'red';
+                    selectedPiece = null;
+                    clearHints();
+                    updateTurnIndicator();
+                    render();
+                    renderMovesList();
+                    updateCommentArea();
+                } else {
+                    // AT MIDDLE MOVE — auto-start sub-variation recording
+                    isRecordingVariation = true;
+                    variationRecordingContext = {
+                        parentPath: [...viewingVariation.path],
+                        startMoveWithin: viewingVariation.moveWithin
+                    };
+                    variationStartIndex = viewingVariation.moveWithin;
+                    variationMoves = [];
+                    variationMovesICCS = [];
+                    variationMovesChinese = [];
+                    viewingVariation = null;
+                    updateVariationUI();
+                    executeMove(x, y);
+                }
+                return;
+            }
+        }
+        return;
+    }
+
+    if (!piece && !selectedPiece) return;
+
+    // Select a piece
+    if (piece) {
+        const isRed = piece === piece.toUpperCase();
+        const expectedRed = currentTurn === 'red';
+        if (isRed === expectedRed) {
+            selectedPiece = { x, y };
+            clearHints();
+            const validMoves = engine.getValidMoves(board, x, y);
+            showHints(validMoves);
+            render();
+            return;
+        }
+    }
+
+    // Try to move to clicked square
+    if (selectedPiece) {
+        const validMoves = engine.getValidMoves(board, selectedPiece.x, selectedPiece.y);
+        const target = validMoves.find(m => m.x === x && m.y === y);
+        if (target) {
+            executeMove(x, y);
+        } else if (piece) {
+            // Clicked on own piece? Re-select
+            const isRed = piece === piece.toUpperCase();
+            const expectedRed = currentTurn === 'red';
+            if (isRed === expectedRed) {
+                selectedPiece = { x, y };
+                clearHints();
+                const vm = engine.getValidMoves(board, x, y);
+                showHints(vm);
+                render();
+            }
+        }
+    }
+}
+
+/* ===== Execute Move ===== */
+function executeMove(toX, toY) {
+    if (!selectedPiece) return;
+    const fromX = selectedPiece.x;
+    const fromY = selectedPiece.y;
+    const piece = board[fromY][fromX];
+    const captured = board[toY][toX];
+
+    const moveObj = { from: { x: fromX, y: fromY }, to: { x: toX, y: toY }, piece: piece, captured: captured };
+    const iccs = moveToICCS({ x: fromX, y: fromY }, { x: toX, y: toY });
+    const notation = formatMoveNotation(board, { x: fromX, y: fromY }, { x: toX, y: toY }, piece);
+
+    // Execute on board
+    board[toY][toX] = piece;
+    board[fromY][fromX] = null;
+
+    if (isRecordingVariation) {
+        variationMoves.push(moveObj);
+        variationMovesICCS.push(iccs);
+        variationMovesChinese.push(notation);
+    } else {
+        moves.push(moveObj);
+        movesICCS.push(iccs);
+        movesChinese.push(notation);
+        currentMoveIndex = moves.length - 1;
+    }
+
+    lastMove = moveObj;
+    selectedPiece = null;
+    clearHints();
+
+    // Toggle turn
+    currentTurn = currentTurn === 'red' ? 'black' : 'red';
+    updateTurnIndicator();
+
+    render();
+    renderMovesList();
+    updateCommentArea();
+}
+
+/* ===== Navigation ===== */
+function replayToIndex(targetIndex) {
+    board = engine.init();
+    lastMove = null;
+    currentTurn = 'red';
+
+    for (let i = 0; i <= targetIndex && i < moves.length; i++) {
+        const m = moves[i];
+        board[m.to.y][m.to.x] = m.piece;
+        board[m.from.y][m.from.x] = null;
+        lastMove = m;
+        currentTurn = currentTurn === 'red' ? 'black' : 'red';
+    }
+
+    currentMoveIndex = targetIndex;
+    selectedPiece = null;
+    clearHints();
+    updateTurnIndicator();
+    render();
+    renderMovesList();
+    updateCommentArea();
+}
+
+function goFirst() {
+    if (viewingVariation) { loadVariationView(viewingVariation.path, 0); return; }
+    if (moves.length > 0) replayToIndex(-1);
+}
+function goPrev() {
+    if (viewingVariation) {
+        if (viewingVariation.moveWithin > 0) {
+            loadVariationView(viewingVariation.path, viewingVariation.moveWithin - 1);
+        } else {
+            exitVariationView();
+        }
+        return;
+    }
+    if (currentMoveIndex >= 0) replayToIndex(currentMoveIndex - 1);
+}
+function goNext() {
+    if (viewingVariation) {
+        const v = resolveVariationPath(viewingVariation.path);
+        if (v && viewingVariation.moveWithin < v.moves.length - 1) {
+            loadVariationView(viewingVariation.path, viewingVariation.moveWithin + 1);
+        }
+        return;
+    }
+    if (currentMoveIndex < moves.length - 1) replayToIndex(currentMoveIndex + 1);
+}
+function goLast() {
+    if (viewingVariation) {
+        const v = resolveVariationPath(viewingVariation.path);
+        if (v) loadVariationView(viewingVariation.path, v.moves.length - 1);
+        return;
+    }
+    if (moves.length > 0) replayToIndex(moves.length - 1);
+}
+
+function undoLastMove() {
+    if (moves.length === 0) return;
+    moves.pop();
+    movesICCS.pop();
+    movesChinese.pop();
+    // Remove comment/variation at removed index
+    const removedIdx = moves.length.toString();
+    delete comments[removedIdx];
+    delete variations[removedIdx];
+    replayToIndex(moves.length - 1);
+}
+
+function newGame() {
+    board = engine.init();
+    moves = [];
+    movesICCS = [];
+    movesChinese = [];
+    comments = {};
+    variations = {};
+    currentMoveIndex = -1;
+    currentTurn = 'red';
+    selectedPiece = null;
+    lastMove = null;
+    loadedGameId = null;
+    loadedGameCreator = null;
+    isRecordingVariation = false;
+    viewingVariation = null;
+    variationRecordingContext = null;
+    variationMoves = [];
+    variationMovesICCS = [];
+    variationMovesChinese = [];
+
+    clearHints();
+    updateTurnIndicator();
+    render();
+    renderMovesList();
+    updateCommentArea();
+    clearDetailsForm();
+    updateVariationUI();
+    document.getElementById('btn-save-game').style.display = '';
+    showToast('New game started', 'info');
+}
+
+/* ===== Render Moves List ===== */
+let expandedVariations = {}; // { "idx": varIndex|'all' }
+
+function resolveVariationPath(path) {
+    let vars = variations;
+    let current = null;
+    for (const step of path) {
+        const list = vars[step.moveIndex.toString()];
+        if (!list || !list[step.varIndex]) return null;
+        current = list[step.varIndex];
+        vars = current.variations || {};
+    }
+    return current;
+}
+
+function isViewingPath(path, moveWithin) {
+    if (!viewingVariation) return false;
+    if (viewingVariation.path.length !== path.length) return false;
+    for (let i = 0; i < path.length; i++) {
+        if (viewingVariation.path[i].moveIndex.toString() !== path[i].moveIndex.toString()) return false;
+        if (viewingVariation.path[i].varIndex !== path[i].varIndex) return false;
+    }
+    return moveWithin === undefined || viewingVariation.moveWithin === moveWithin;
+}
+
+function getExpandKey(parentPath, idx) {
+    return parentPath.length === 0 ? idx.toString() : parentPath.map(p => `${p.moveIndex}_${p.varIndex}`).join('/') + '/' + idx;
+}
+
+function toggleVariationExpand(expandKey, specificVarIndex) {
+    if (specificVarIndex !== undefined) {
+        if (expandedVariations[expandKey] === specificVarIndex) {
+            delete expandedVariations[expandKey];
+        } else {
+            expandedVariations[expandKey] = specificVarIndex;
+        }
+    } else {
+        if (expandedVariations[expandKey] === 'all') {
+            delete expandedVariations[expandKey];
+        } else {
+            expandedVariations[expandKey] = 'all';
+        }
+    }
+    renderMovesListWithExpansion();
+}
+
+function expandAll() {
+    function collectKeys(varsObj, parentPath) {
+        for (const [idx, varList] of Object.entries(varsObj)) {
+            if (!varList || varList.length === 0) continue;
+            const key = getExpandKey(parentPath, idx);
+            expandedVariations[key] = 'all';
+            varList.forEach((v, vi) => {
+                if (v.variations) collectKeys(v.variations, [...parentPath, { moveIndex: idx, varIndex: vi }]);
+            });
+        }
+    }
+    collectKeys(variations, []);
+    renderMovesListWithExpansion();
+}
+
+function collapseAll() {
+    expandedVariations = {};
+    renderMovesListWithExpansion();
+}
+
+function renderVariationsHtml(varsObj, parentPath, depth) {
+    let html = '';
+    const indent = 40 + (depth * 20);
+    const badgePalette = [
+        { bg: '#f59e0b', border: '#b45309', bgLight: '#fef3c7' },
+        { bg: '#3b82f6', border: '#1d4ed8', bgLight: '#eff6ff' },
+        { bg: '#10b981', border: '#047857', bgLight: '#f0fdf4' },
+        { bg: '#8b5cf6', border: '#6d28d9', bgLight: '#f5f3ff' },
+        { bg: '#ef4444', border: '#b91c1c', bgLight: '#fef2f2' },
+        { bg: '#ec4899', border: '#be185d', bgLight: '#fdf2f8' },
+        { bg: '#06b6d4', border: '#0e7490', bgLight: '#ecfeff' },
+        { bg: '#f97316', border: '#c2410c', bgLight: '#fff7ed' }
+    ];
+
+    for (const [moveIdx, varList] of Object.entries(varsObj)) {
+        if (!varList || varList.length === 0) continue;
+
+        // For sub-variations (depth > 0): only show if user is viewing the parent variation
+        // and the sub-variation branches from the currently viewed move within that variation
+        if (depth > 0) {
+            const isViewingParent = viewingVariation && viewingVariation.path.length >= parentPath.length;
+            if (!isViewingParent) continue;
+            // Check parent path matches
+            let parentMatch = true;
+            for (let i = 0; i < parentPath.length; i++) {
+                if (!viewingVariation.path[i] ||
+                    viewingVariation.path[i].moveIndex.toString() !== parentPath[i].moveIndex.toString() ||
+                    viewingVariation.path[i].varIndex !== parentPath[i].varIndex) {
+                    parentMatch = false;
+                    break;
+                }
+            }
+            if (!parentMatch) continue;
+            // Only show if user is at or past the branch point
+            if (viewingVariation.path.length === parentPath.length) {
+                if (viewingVariation.moveWithin < parseInt(moveIdx)) continue;
+            }
+        }
+
+        varList.forEach((v, vi) => {
+            const currentPath = [...parentPath, { moveIndex: moveIdx, varIndex: vi }];
+            const expandKey = getExpandKey(parentPath, moveIdx) + '_' + vi;
+            const isCollapsed = expandedVariations[expandKey] === 'collapsed';
+            const c = badgePalette[vi % badgePalette.length];
+
+            html += `<div class="move-row"><div class="variation-container" style="margin-left:${indent}px; border-left-color:${c.bg}; background:${c.bgLight};">`;
+            html += `<div class="variation-label">`;
+            html += `<span class="var-collapse-toggle" data-expand-key="${expandKey}" title="${isCollapsed ? 'Expand' : 'Collapse'}">${isCollapsed ? '&#9654;' : '&#9660;'}</span> `;
+            html += `<span class="var-label-text" data-path='${JSON.stringify(currentPath)}'>${v.label || '变 ' + (vi + 1)}</span>`;
+            html += ` <span class="var-edit" data-path='${JSON.stringify(currentPath)}' title="Edit label">&#9998;</span>`;
+            html += ` <span class="var-delete" data-path='${JSON.stringify(currentPath)}' title="Delete variation">&#128465;</span></div>`;
+
+            if (!isCollapsed) {
+                const notations = getVarNotations(v);
+                // Determine red/black: root moveIndex from the top-level path determines starting color
+                const rootMoveIdx = parseInt(currentPath[0].moveIndex);
+                const branchIsRed = rootMoveIdx % 2 === 0;
+                notations.forEach((mn, mi) => {
+                    const isActive = isViewingPath(currentPath, mi);
+                    const hasComment = v.comments && v.comments[mi.toString()];
+                    const hasSubVar = v.variations && v.variations[mi.toString()] && v.variations[mi.toString()].length > 0;
+                    const isRedMove = (mi % 2 === 0) ? branchIsRed : !branchIsRed;
+                    const displayMn = notationMode === 'chinese' ? toChineseNotation(mn, isRedMove) : mn;
+                    html += `<span class="variation-move ${isActive ? 'active' : ''}" data-path='${JSON.stringify(currentPath)}' data-mi="${mi}">${displayMn}${hasComment ? ' <span class="move-icon">&#128221;</span>' : ''}${hasSubVar ? ' <span class="move-icon" title="Has sub-variation">&#128256;</span>' : ''}</span>`;
+                });
+            }
+            html += '</div></div>';
+
+            // Recurse into sub-variations (only if not collapsed)
+            if (!isCollapsed && v.variations && Object.keys(v.variations).length > 0) {
+                html += renderVariationsHtml(v.variations, currentPath, depth + 1);
+            }
+        });
+    }
+    return html;
+}
+
+function renderMovesList() { renderMovesListWithExpansion(); }
+
+function renderMovesListWithExpansion() {
+    const container = document.getElementById('moves-list');
+    if (moves.length === 0) {
+        container.innerHTML = '<div style="text-align:center; color:#94a3b8; padding:30px 10px; font-size:0.85rem;">No moves yet. Click pieces to start recording.</div>';
+        return;
+    }
+
+    let html = '';
+    const totalRounds = Math.ceil(moves.length / 2);
+
+    for (let r = 0; r < totalRounds; r++) {
+        const redIdx = r * 2;
+        const blackIdx = r * 2 + 1;
+
+        html += '<div class="move-row">';
+        html += `<span class="move-round">${r + 1}</span>`;
+
+        // Red move
+        if (redIdx < moves.length) {
+            const isActive = currentMoveIndex === redIdx && !viewingVariation;
+            const hasComment = comments[redIdx.toString()];
+            const hasVariation = variations[redIdx.toString()] && variations[redIdx.toString()].length > 0;
+            html += `<span class="move-cell red-move ${isActive ? 'active' : ''}" data-idx="${redIdx}">`;
+            html += getNotation(redIdx);
+            if (hasComment) html += ' <span class="move-icon" title="Has comment">&#128221;</span>';
+            if (hasVariation) html += ` <span class="move-icon var-toggle" data-vidx="${redIdx}" title="Has variation">&#128256;</span>`;
+            html += '</span>';
+        } else {
+            html += '<span class="move-cell"></span>';
+        }
+
+        // Black move
+        if (blackIdx < moves.length) {
+            const isActive = currentMoveIndex === blackIdx && !viewingVariation;
+            const hasComment = comments[blackIdx.toString()];
+            const hasVariation = variations[blackIdx.toString()] && variations[blackIdx.toString()].length > 0;
+            html += `<span class="move-cell black-move ${isActive ? 'active' : ''}" data-idx="${blackIdx}">`;
+            html += getNotation(blackIdx);
+            if (hasComment) html += ' <span class="move-icon" title="Has comment">&#128221;</span>';
+            if (hasVariation) html += ` <span class="move-icon var-toggle" data-vidx="${blackIdx}" title="Has variation">&#128256;</span>`;
+            html += '</span>';
+        } else {
+            html += '<span class="move-cell"></span>';
+        }
+
+        html += '</div>';
+
+        // Show variations only for the currently active/selected move
+        [redIdx, blackIdx].forEach(idx => {
+            if (idx > moves.length - 1) return;
+            const vars = variations[idx.toString()];
+            if (vars && vars.length > 0) {
+                const isActiveMove = (currentMoveIndex === idx && !viewingVariation);
+                const isViewedVarBranch = viewingVariation &&
+                    viewingVariation.path.length > 0 &&
+                    parseInt(viewingVariation.path[0].moveIndex) === idx;
+                if (isActiveMove || isViewedVarBranch) {
+                    html += renderVariationsHtml({ [idx]: vars }, [], 0);
+                }
+            }
+        });
+    }
+
+    container.innerHTML = html;
+    wireUpMovesListHandlers(container);
+}
+
+function wireUpMovesListHandlers(container) {
+    // Main move clicks
+    container.querySelectorAll('.move-cell[data-idx]').forEach(el => {
+        el.addEventListener('click', (e) => {
+            if (e.target.classList.contains('var-toggle')) return;
+            const idx = parseInt(el.dataset.idx);
+            if (viewingVariation) exitVariationView();
+            replayToIndex(idx);
+        });
+    });
+
+    // Var toggle icon on main moves
+    container.querySelectorAll('.var-toggle').forEach(el => {
+        el.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const vidx = el.dataset.vidx;
+            const expandKey = getExpandKey([], vidx);
+            toggleVariationExpand(expandKey);
+        });
+    });
+
+    // Variation collapse/expand toggles
+    container.querySelectorAll('.var-collapse-toggle').forEach(el => {
+        el.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const key = el.dataset.expandKey;
+            if (expandedVariations[key] === 'collapsed') {
+                delete expandedVariations[key];
+            } else {
+                expandedVariations[key] = 'collapsed';
+            }
+            renderMovesListWithExpansion();
+        });
+    });
+
+    // Variation move clicks
+    container.querySelectorAll('.variation-move').forEach(el => {
+        el.addEventListener('click', () => {
+            const path = JSON.parse(el.dataset.path);
+            const mi = parseInt(el.dataset.mi);
+            loadVariationView(path, mi);
+        });
+    });
+
+    // Delete variation
+    container.querySelectorAll('.var-delete').forEach(el => {
+        el.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const path = JSON.parse(el.dataset.path);
+            if (confirm('Delete this variation?')) {
+                deleteVariationByPath(path);
+            }
+        });
+    });
+
+    // Edit variation label
+    container.querySelectorAll('.var-edit').forEach(el => {
+        el.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const path = JSON.parse(el.dataset.path);
+            startEditVariationLabel(path);
+        });
+    });
+}
+
+/* ===== Comment System ===== */
+function updateCommentArea() {
+    const input = document.getElementById('comment-input');
+    const label = document.getElementById('comment-label');
+
+    if (viewingVariation) {
+        const v = resolveVariationPath(viewingVariation.path);
+        if (!v) { input.disabled = true; input.value = ''; label.textContent = 'Move comment'; return; }
+        input.disabled = false;
+        const key = viewingVariation.moveWithin.toString();
+        label.textContent = `Comment for variation move ${viewingVariation.moveWithin + 1}`;
+        input.value = (v.comments && v.comments[key]) || '';
+        return;
+    }
+
+    if (currentMoveIndex < 0) {
+        label.textContent = 'Move comment (no move selected)';
+        input.value = '';
+        input.disabled = true;
+        return;
+    }
+    input.disabled = false;
+    const key = currentMoveIndex.toString();
+    label.textContent = `Comment for move ${currentMoveIndex + 1}`;
+    input.value = comments[key] || '';
+}
+
+function saveComment() {
+    const input = document.getElementById('comment-input');
+    const val = input.value.trim();
+
+    if (viewingVariation) {
+        const v = resolveVariationPath(viewingVariation.path);
+        if (!v) return;
+        if (!v.comments) v.comments = {};
+        const key = viewingVariation.moveWithin.toString();
+        if (val) { v.comments[key] = val; } else { delete v.comments[key]; }
+        renderMovesListWithExpansion();
+        return;
+    }
+
+    if (currentMoveIndex < 0) return;
+    const key = currentMoveIndex.toString();
+    if (val) {
+        comments[key] = val;
+    } else {
+        delete comments[key];
+    }
+    renderMovesListWithExpansion();
+}
+
+/* ===== Variation System ===== */
+function startVariation() {
+    if (isRecordingVariation) return;
+
+    if (viewingVariation) {
+        // Start sub-variation recording — undo current variation move so user can record alternative
+        const parentPath = [...viewingVariation.path];
+        const branchAt = viewingVariation.moveWithin;
+
+        // Replay board to one move before in the variation
+        if (branchAt > 0) {
+            loadVariationView(parentPath, branchAt - 1);
+        } else {
+            // First move of variation — replay to branch point on main line
+            const firstStep = parentPath[0];
+            replayToIndex(parseInt(firstStep.moveIndex));
+        }
+        viewingVariation = null;  // Clear after replay
+
+        isRecordingVariation = true;
+        variationRecordingContext = {
+            parentPath: parentPath,
+            startMoveWithin: branchAt
+        };
+        variationStartIndex = branchAt;
+        variationMoves = [];
+        variationMovesICCS = [];
+        variationMovesChinese = [];
+        updateVariationUI();
+        showToast('Recording sub-variation (alternative to move ' + (branchAt + 1) + ')', 'info');
+        return;
+    }
+
+    if (currentMoveIndex < 0) {
+        showToast('Make at least one move first', 'error');
+        return;
+    }
+
+    isRecordingVariation = true;
+    variationRecordingContext = null;
+    variationStartIndex = currentMoveIndex;
+    variationMoves = [];
+    variationMovesICCS = [];
+    variationMovesChinese = [];
+
+    replayToIndex(variationStartIndex - 1);  // Undo current move so user can record alternative
+    updateVariationUI();
+    showToast('Recording alternative to move ' + (variationStartIndex + 1), 'info');
+}
+
+function endVariation() {
+    if (!isRecordingVariation) return;
+    if (variationMoves.length === 0) {
+        showToast('No variation moves recorded', 'error');
+        isRecordingVariation = false;
+        variationRecordingContext = null;
+        updateVariationUI();
+        return;
+    }
+
+    let existingCount = 0;
+    if (variationRecordingContext) {
+        const parentVar = resolveVariationPath(variationRecordingContext.parentPath);
+        if (parentVar && parentVar.variations) {
+            const key = variationRecordingContext.startMoveWithin.toString();
+            existingCount = (parentVar.variations[key] || []).length;
+        }
+    } else {
+        const key = variationStartIndex.toString();
+        existingCount = (variations[key] || []).length;
+    }
+    const label = document.getElementById('variation-label-input').value.trim() || ('变 ' + (existingCount + 1));
+    const newVar = {
+        moves: JSON.parse(JSON.stringify(variationMoves)),
+        movesICCS: [...variationMovesICCS],
+        movesChinese: [...variationMovesChinese],
+        label: label,
+        badgeText: '变',
+        comments: {},
+        variations: {}
+    };
+
+    if (variationRecordingContext) {
+        // Sub-variation: store inside parent variation
+        const parentVar = resolveVariationPath(variationRecordingContext.parentPath);
+        if (parentVar) {
+            if (!parentVar.variations) parentVar.variations = {};
+            const key = variationRecordingContext.startMoveWithin.toString();
+            if (!parentVar.variations[key]) parentVar.variations[key] = [];
+            parentVar.variations[key].push(newVar);
+        }
+        // Return to viewing parent at the branch point
+        const returnPath = [...variationRecordingContext.parentPath];
+        const returnMoveWithin = variationRecordingContext.startMoveWithin;
+
+        isRecordingVariation = false;
+        variationMoves = [];
+        variationMovesICCS = [];
+        variationMovesChinese = [];
+        variationRecordingContext = null;
+        document.getElementById('variation-label-input').value = '';
+
+        loadVariationView(returnPath, returnMoveWithin);
+        showToast('Sub-variation saved!', 'success');
+    } else {
+        // Main line variation
+        const key = variationStartIndex.toString();
+        if (!variations[key]) variations[key] = [];
+        variations[key].push(newVar);
+
+        isRecordingVariation = false;
+        variationMoves = [];
+        variationMovesICCS = [];
+        variationMovesChinese = [];
+        document.getElementById('variation-label-input').value = '';
+
+        replayToIndex(variationStartIndex);
+        const expandKey = getExpandKey([], variationStartIndex);
+        expandedVariations[expandKey] = variations[key].length - 1;
+        updateVariationUI();
+        renderMovesListWithExpansion();
+        showToast('Variation saved!', 'success');
+    }
+}
+
+function loadVariationView(path, mw) {
+    const targetPath = Array.isArray(path) ? path : [{ moveIndex: path.toString(), varIndex: arguments[1] }];
+    const targetMoveWithin = Array.isArray(path) ? mw : arguments[2];
+
+    // Replay main line to first branch point
+    board = engine.init();
+    lastMove = null;
+    currentTurn = 'red';
+    const firstBranch = parseInt(targetPath[0].moveIndex);
+
+    for (let i = 0; i <= firstBranch && i < moves.length; i++) {
+        const m = moves[i];
+        board[m.to.y][m.to.x] = m.piece;
+        board[m.from.y][m.from.x] = null;
+        lastMove = m;
+        currentTurn = currentTurn === 'red' ? 'black' : 'red';
+    }
+
+    // For each level in the path, apply variation moves
+    let currentVars = variations;
+    for (let level = 0; level < targetPath.length; level++) {
+        const step = targetPath[level];
+        const varList = currentVars[step.moveIndex.toString()];
+        if (!varList || !varList[step.varIndex]) return;
+        const v = varList[step.varIndex];
+
+        let stopAt;
+        if (level < targetPath.length - 1) {
+            stopAt = parseInt(targetPath[level + 1].moveIndex);
+        } else {
+            stopAt = targetMoveWithin;
+        }
+
+        for (let i = 0; i <= stopAt && i < v.moves.length; i++) {
+            const m = v.moves[i];
+            board[m.to.y][m.to.x] = m.piece;
+            board[m.from.y][m.from.x] = null;
+            lastMove = m;
+            currentTurn = currentTurn === 'red' ? 'black' : 'red';
+        }
+        currentVars = v.variations || {};
+    }
+
+    viewingVariation = { path: targetPath.map(p => ({ moveIndex: p.moveIndex.toString(), varIndex: p.varIndex })), moveWithin: targetMoveWithin };
+
+    // Auto-expand the variation in the tree
+    for (let i = 0; i < targetPath.length; i++) {
+        const parentSlice = targetPath.slice(0, i);
+        const expandKey = getExpandKey(parentSlice, targetPath[i].moveIndex);
+        expandedVariations[expandKey] = targetPath[i].varIndex;
+    }
+
+    selectedPiece = null;
+    clearHints();
+    updateTurnIndicator();
+    render();
+    updateVariationUI();
+    renderMovesListWithExpansion();
+    updateCommentArea();
+}
+
+function exitVariationView() {
+    viewingVariation = null;
+    replayToIndex(currentMoveIndex);
+    updateVariationUI();
+    renderMovesListWithExpansion();
+    updateCommentArea();
+}
+
+function undoVariationMove() {
+    if (!viewingVariation) return;
+    const v = resolveVariationPath(viewingVariation.path);
+    if (!v || v.moves.length === 0) return;
+
+    // Remove last move from variation
+    v.moves.pop();
+    v.movesICCS.pop();
+    v.movesChinese.pop();
+
+    // Also remove any comment on the removed move
+    const removedIdx = v.moves.length.toString();
+    if (v.comments && v.comments[removedIdx]) {
+        delete v.comments[removedIdx];
+    }
+
+    // Also remove any sub-variations branching from the removed move
+    if (v.variations && v.variations[removedIdx]) {
+        delete v.variations[removedIdx];
+    }
+
+    if (v.moves.length === 0) {
+        // Variation now empty — exit variation view
+        exitVariationView();
+        showToast('Variation move removed', 'info');
+        return;
+    }
+
+    // Reload variation at the new last move
+    loadVariationView(viewingVariation.path, v.moves.length - 1);
+    showToast('Variation move removed', 'info');
+}
+
+function deleteVariationByPath(path) {
+    if (path.length === 0) return;
+    const lastStep = path[path.length - 1];
+    let targetVars;
+    if (path.length === 1) {
+        targetVars = variations;
+    } else {
+        const parentPath = path.slice(0, -1);
+        const parentVar = resolveVariationPath(parentPath);
+        if (!parentVar) return;
+        targetVars = parentVar.variations || {};
+    }
+
+    const key = lastStep.moveIndex.toString();
+    if (!targetVars[key]) return;
+    targetVars[key].splice(lastStep.varIndex, 1);
+    if (targetVars[key].length === 0) {
+        delete targetVars[key];
+    }
+
+    if (viewingVariation && isViewingPath(path)) {
+        exitVariationView();
+        return;
+    }
+    renderMovesListWithExpansion();
+    showToast('Variation deleted', 'info');
+}
+
+function startEditVariationLabel(path) {
+    const v = resolveVariationPath(path);
+    if (!v) return;
+
+    const span = document.querySelector(`.var-label-text[data-path='${JSON.stringify(path)}']`);
+    if (!span) return;
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = v.label || '';
+    input.style.cssText = 'font-size:0.7rem; font-weight:700; padding:2px 6px; border:1px solid #d97706; border-radius:4px; width:140px;';
+
+    const save = () => {
+        v.label = input.value.trim() || ('变 ' + (path[path.length - 1].varIndex + 1));
+        renderMovesListWithExpansion();
+    };
+
+    input.addEventListener('blur', save);
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); save(); }
+        if (e.key === 'Escape') { renderMovesListWithExpansion(); }
+    });
+
+    span.replaceWith(input);
+    input.focus();
+    input.select();
+}
+
+function updateVariationUI() {
+    const indicator = document.getElementById('variation-indicator');
+    const endControls = document.getElementById('variation-end-controls');
+    const addBtn = document.getElementById('btn-add-variation');
+    const backBtn = document.getElementById('btn-back-main-line');
+    const undoBtn = document.getElementById('btn-undo-var-move');
+
+    if (isRecordingVariation) {
+        indicator.classList.add('active');
+        document.getElementById('variation-at-move').textContent = variationStartIndex + 1;
+        endControls.classList.add('active');
+        addBtn.style.display = 'none';
+        backBtn.style.display = 'none';
+        undoBtn.style.display = 'none';
+    } else if (viewingVariation) {
+        indicator.classList.remove('active');
+        endControls.classList.remove('active');
+        addBtn.style.display = isGameOwner() ? 'block' : 'none';
+        addBtn.textContent = 'Add Sub-Variation';
+        backBtn.style.display = 'block';
+        undoBtn.style.display = isGameOwner() ? 'block' : 'none';
+    } else {
+        indicator.classList.remove('active');
+        endControls.classList.remove('active');
+        addBtn.style.display = isGameOwner() ? 'block' : 'none';
+        addBtn.textContent = 'Add Variation';
+        backBtn.style.display = 'none';
+        undoBtn.style.display = 'none';
+    }
+}
+
+/* ===== Opening Name Autocomplete ===== */
+let openingNamesCache = null;
+let openingDebounceTimer = null;
+
+async function loadOpeningNamesCache() {
+    if (openingNamesCache !== null) return;
+    if (!currentUser) return;
+    try {
+        const collPath = `artifacts/${appId}/public/data/knowledge-base`;
+        const q = query(collection(db, collPath), where('createdBy', '==', currentUser.uid));
+        const snapshot = await getDocs(q);
+        const names = new Set();
+        snapshot.forEach(doc => {
+            const name = doc.data().openingName;
+            if (name && name.trim()) names.add(name.trim());
+        });
+        openingNamesCache = Array.from(names).sort();
+    } catch (err) {
+        console.error('Error loading opening names:', err);
+        openingNamesCache = [];
+    }
+}
+
+function showOpeningSuggestions(filter) {
+    const dropdown = document.getElementById('opening-suggestions');
+    if (!openingNamesCache || !filter.trim()) {
+        dropdown.style.display = 'none';
+        return;
+    }
+    const lower = filter.toLowerCase();
+    const matches = openingNamesCache.filter(n => n.toLowerCase().includes(lower));
+    if (matches.length === 0) {
+        dropdown.style.display = 'none';
+        return;
+    }
+    dropdown.innerHTML = matches.map(n =>
+        `<div class="autocomplete-item">${n}</div>`
+    ).join('');
+    dropdown.style.display = 'block';
+
+    dropdown.querySelectorAll('.autocomplete-item').forEach(item => {
+        item.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            document.getElementById('input-opening').value = item.textContent;
+            dropdown.style.display = 'none';
+        });
+    });
+}
+
+function initOpeningAutocomplete() {
+    const input = document.getElementById('input-opening');
+    input.addEventListener('focus', () => {
+        loadOpeningNamesCache();
+    });
+    input.addEventListener('input', () => {
+        clearTimeout(openingDebounceTimer);
+        openingDebounceTimer = setTimeout(() => {
+            showOpeningSuggestions(input.value);
+        }, 300);
+    });
+    input.addEventListener('blur', () => {
+        setTimeout(() => {
+            document.getElementById('opening-suggestions').style.display = 'none';
+        }, 200);
+    });
+}
+
+/* ===== Details Form ===== */
+function getDetailsFromForm() {
+    return {
+        gameTitle: document.getElementById('input-game-title').value.trim(),
+        redPlayer: document.getElementById('input-red-player').value.trim(),
+        blackPlayer: document.getElementById('input-black-player').value.trim(),
+        datePlayed: document.getElementById('input-date').value,
+        location: document.getElementById('input-location').value.trim(),
+        result: document.getElementById('input-result').value,
+        openingName: document.getElementById('input-opening').value.trim(),
+        keywords: [
+            document.getElementById('input-kw1').value.trim(),
+            document.getElementById('input-kw2').value.trim(),
+            document.getElementById('input-kw3').value.trim()
+        ],
+        isPublic: document.getElementById('input-public').checked
+    };
+}
+
+function populateDetailsForm(data) {
+    document.getElementById('input-game-title').value = data.gameTitle || '';
+    document.getElementById('input-red-player').value = data.redPlayer || '';
+    document.getElementById('input-black-player').value = data.blackPlayer || '';
+    document.getElementById('input-date').value = data.datePlayed || '';
+    document.getElementById('input-location').value = data.location || '';
+    document.getElementById('input-result').value = data.result || 'no-result';
+    document.getElementById('input-opening').value = data.openingName || '';
+    const kw = data.keywords || ['', '', ''];
+    document.getElementById('input-kw1').value = kw[0] || '';
+    document.getElementById('input-kw2').value = kw[1] || '';
+    document.getElementById('input-kw3').value = kw[2] || '';
+    document.getElementById('input-public').checked = !!data.isPublic;
+}
+
+function clearDetailsForm() {
+    document.getElementById('input-game-title').value = '';
+    document.getElementById('input-red-player').value = '';
+    document.getElementById('input-black-player').value = '';
+    document.getElementById('input-date').value = '';
+    document.getElementById('input-location').value = '';
+    document.getElementById('input-result').value = 'no-result';
+    document.getElementById('input-opening').value = '';
+    document.getElementById('input-kw1').value = '';
+    document.getElementById('input-kw2').value = '';
+    document.getElementById('input-kw3').value = '';
+    document.getElementById('input-public').checked = false;
+}
+
+/* ===== Firebase: Save Game ===== */
+async function saveGame() {
+    if (!currentUser) { showToast('Not authenticated', 'error'); return; }
+    if (loadedGameId && !isGameOwner()) { showToast('You cannot modify games created by others', 'error'); return; }
+    if (moves.length === 0) { showToast('At least 1 move is required to save', 'error'); return; }
+
+    const details = getDetailsFromForm();
+    const docData = {
+        createdBy: currentUser.uid,
+        createdByName: (userProfile && userProfile.name) || currentUser.email,
+        createdAt: loadedGameId ? undefined : Date.now(),
+        updatedAt: Date.now(),
+        gameTitle: details.gameTitle,
+        redPlayer: details.redPlayer,
+        blackPlayer: details.blackPlayer,
+        datePlayed: details.datePlayed,
+        location: details.location,
+        result: details.result,
+        openingName: details.openingName,
+        keywords: details.keywords,
+        isPublic: details.isPublic,
+        moves: JSON.parse(JSON.stringify(moves)),
+        movesICCS: [...movesICCS],
+        movesChinese: [...movesChinese],
+        totalMoves: moves.length,
+        variations: JSON.parse(JSON.stringify(variations)),
+        comments: JSON.parse(JSON.stringify(comments)),
+        thumbsUp: loadedGameId ? undefined : [],
+        thumbsDown: loadedGameId ? undefined : []
+    };
+
+    // Remove undefined fields
+    Object.keys(docData).forEach(k => { if (docData[k] === undefined) delete docData[k]; });
+
+    try {
+        const collPath = `artifacts/${appId}/public/data/knowledge-base`;
+        if (loadedGameId) {
+            const docRef = doc(db, collPath, loadedGameId);
+            await setDoc(docRef, docData, { merge: true });
+            showToast('Game updated!', 'success');
+        } else {
+            const colRef = collection(db, collPath);
+            const newDocRef = doc(colRef);
+            docData.kbId = newDocRef.id;
+            docData.createdAt = Date.now();
+            await setDoc(newDocRef, docData);
+            loadedGameId = newDocRef.id;
+            showToast('Game saved!', 'success');
+        }
+        openingNamesCache = null;
+        await loadMyGames();
+    } catch (err) {
+        console.error('Save error:', err);
+        showToast('Save failed: ' + err.message, 'error');
+    }
+}
+
+/* ===== Firebase: Load My Games ===== */
+async function loadMyGames() {
+    if (!currentUser) return;
+    try {
+        const collPath = `artifacts/${appId}/public/data/knowledge-base`;
+        const q = query(collection(db, collPath), where('createdBy', '==', currentUser.uid));
+        const snapshot = await getDocs(q);
+        allMyGames = [];
+        snapshot.forEach(d => {
+            allMyGames.push({ id: d.id, ...d.data() });
+        });
+        allMyGames.sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
+        if (currentGamesView === 'mine') renderPaginatedGames();
+    } catch (err) {
+        console.error('Load games error:', err);
+    }
+}
+
+function renderMyGames(games) { renderPaginatedGames(); }
+
+function renderPaginatedGames() {
+    const games = currentGamesView === 'mine' ? allMyGames : allPublicGames;
+    const totalPages = Math.ceil(games.length / gamesPerPage) || 1;
+    if (currentPage > totalPages) currentPage = totalPages;
+    const startIdx = (currentPage - 1) * gamesPerPage;
+    const pageGames = games.slice(startIdx, startIdx + gamesPerPage);
+    document.getElementById('my-games-count').textContent = games.length;
+    const badge = document.getElementById('game-count-badge');
+    if (badge) badge.textContent = (currentGamesView === 'mine' ? allMyGames.length + ' games' : allPublicGames.length + ' public');
+    renderGameCards(pageGames);
+    renderPaginationControls(totalPages);
+}
+
+function renderGameCards(games) {
+    const container = document.getElementById('games-list');
+    if (games.length === 0) {
+        const msg = currentGamesView === 'mine' ? 'No games saved yet.' : 'No public games available.';
+        container.innerHTML = `<div style="text-align:center; color:#94a3b8; padding:30px 10px; font-size:0.85rem;">${msg}</div>`;
+        return;
+    }
+    container.innerHTML = games.map(g => generateGameCardHTML(g)).join('');
+}
+
+function generateGameCardHTML(g) {
+    const resultMap = {
+        'red-win': { text: 'Red Win', cls: 'result-red-win' },
+        'black-win': { text: 'Black Win', cls: 'result-black-win' },
+        'draw': { text: 'Draw', cls: 'result-draw' },
+        'no-result': { text: 'No Result', cls: 'result-no-result' }
+    };
+    const res = resultMap[g.result] || resultMap['no-result'];
+    const dateStr = g.datePlayed || (g.createdAt ? new Date(g.createdAt).toLocaleDateString() : 'Unknown');
+
+    // Omit default player names
+    const redP = (g.redPlayer && g.redPlayer !== 'Red') ? g.redPlayer : null;
+    const blackP = (g.blackPlayer && g.blackPlayer !== 'Black') ? g.blackPlayer : null;
+    let playersHTML;
+    if (redP && blackP) {
+        playersHTML = `<span style="color:var(--primary)">${escHtml(redP)}</span><span class="vs">vs</span><span>${escHtml(blackP)}</span>`;
+    } else if (redP) {
+        playersHTML = `<span style="color:var(--primary)">${escHtml(redP)}</span> <span class="vs">(Red)</span>`;
+    } else if (blackP) {
+        playersHTML = `<span>${escHtml(blackP)}</span> <span class="vs">(Black)</span>`;
+    } else {
+        playersHTML = '';
+    }
+
+    const visIcon = g.isPublic ? '&#128275;' : '&#128274;';
+    const visText = g.isPublic ? 'Public' : 'Private';
+    const title = g.gameTitle ? `<div class="game-card-title">${escHtml(g.gameTitle)}</div>` : '';
+    const creatorName = g.createdByName || 'Unknown';
+    const openingHeading = g.openingName ? `<div class="game-card-opening">${escHtml(g.openingName)}</div>` : '';
+
+    const isOwner = currentUser && g.createdBy === currentUser.uid;
+
+    // Voting
+    const thumbsUp = g.thumbsUp || [];
+    const thumbsDown = g.thumbsDown || [];
+    const upCount = thumbsUp.length;
+    const downCount = thumbsDown.length;
+    const userVote = currentUser ? (thumbsUp.includes(currentUser.uid) ? 'up' : (thumbsDown.includes(currentUser.uid) ? 'down' : null)) : null;
+
+    let votingHTML = '';
+    if (!isOwner) {
+        votingHTML = `<div class="voting-ui">
+            <button class="vote-btn ${userVote === 'up' ? 'voted-up' : ''}" onclick="window.kbApp.vote('${g.id}','up')">&#128077; ${upCount}</button>
+            <button class="vote-btn ${userVote === 'down' ? 'voted-down' : ''}" onclick="window.kbApp.vote('${g.id}','down')">&#128078; ${downCount}</button>
+        </div>`;
+    } else if (upCount > 0 || downCount > 0) {
+        votingHTML = `<div class="vote-count-display"><span>&#128077; ${upCount}</span><span>&#128078; ${downCount}</span></div>`;
+    }
+
+    // Action buttons — only owner gets Make Private/Public + Delete
+    let actionsHTML;
+    if (isOwner) {
+        actionsHTML = `<div class="game-card-actions">
+            <button class="btn-load" onclick="window.kbApp.loadGame('${g.id}')">Load</button>
+            <button class="btn-export" onclick="window.kbApp.exportPGN('${g.id}')">Export</button>
+            <button class="btn-toggle-vis" onclick="window.kbApp.toggleVisibility('${g.id}', ${!g.isPublic})">${g.isPublic ? 'Make Private' : 'Make Public'}</button>
+            <button class="btn-delete" onclick="window.kbApp.confirmDelete('${g.id}')">Delete</button>
+        </div>`;
+    } else {
+        actionsHTML = `<div class="game-card-actions">
+            <button class="btn-load" onclick="window.kbApp.loadGame('${g.id}')">Load</button>
+            <button class="btn-export" onclick="window.kbApp.exportPGN('${g.id}')">Export</button>
+        </div>`;
+    }
+
+    return `
+    <div class="game-card" data-id="${g.id}">
+        ${openingHeading}
+        ${title}
+        <div class="game-card-creator">by <span class="creator-name">${escHtml(creatorName)}</span></div>
+        ${playersHTML ? `<div class="game-card-header"><div class="game-card-players">${playersHTML}</div><span class="result-badge ${res.cls}">${res.text}</span></div>` : `<div class="game-card-header"><span class="result-badge ${res.cls}">${res.text}</span></div>`}
+        <div class="game-card-meta">
+            <span>&#128197; ${escHtml(dateStr)}</span>
+            <span>&#9823; ${g.totalMoves || 0} moves</span>
+            <span class="visibility-icon">${visIcon} ${visText}</span>
+        </div>
+        ${votingHTML}
+        ${actionsHTML}
+    </div>`;
+}
+
+function renderPaginationControls(totalPages) {
+    const container = document.getElementById('games-list');
+    if (totalPages <= 1) return;
+    const paginationHTML = `<div class="pagination-controls">
+        <button class="page-btn" id="btn-prev-page" ${currentPage <= 1 ? 'disabled' : ''}>&#9664; Prev</button>
+        <span class="page-info">Page ${currentPage} of ${totalPages}</span>
+        <button class="page-btn" id="btn-next-page" ${currentPage >= totalPages ? 'disabled' : ''}>Next &#9654;</button>
+    </div>`;
+    container.insertAdjacentHTML('beforeend', paginationHTML);
+    document.getElementById('btn-prev-page')?.addEventListener('click', () => {
+        if (currentPage > 1) { currentPage--; renderPaginatedGames(); document.getElementById('games-list').scrollTop = 0; }
+    });
+    document.getElementById('btn-next-page')?.addEventListener('click', () => {
+        if (currentPage < totalPages) { currentPage++; renderPaginatedGames(); document.getElementById('games-list').scrollTop = 0; }
+    });
+}
+
+function escHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
+/* ===== Firebase: Load Single Game ===== */
+async function loadGame(gameId) {
+    try {
+        const collPath = `artifacts/${appId}/public/data/knowledge-base`;
+        const docRef = doc(db, collPath, gameId);
+        const snap = await getDoc(docRef);
+        if (!snap.exists()) { showToast('Game not found', 'error'); return; }
+        const data = snap.data();
+
+        // Reset state
+        board = engine.init();
+        moves = data.moves || [];
+        movesICCS = data.movesICCS || [];
+        movesChinese = data.movesChinese || [];
+        comments = data.comments || {};
+        variations = data.variations || {};
+        currentMoveIndex = -1;
+        currentTurn = 'red';
+        selectedPiece = null;
+        lastMove = null;
+        loadedGameId = gameId;
+        loadedGameCreator = data.createdBy || null;
+        isRecordingVariation = false;
+        viewingVariation = null;
+        variationRecordingContext = null;
+        expandedVariations = {};
+
+        // Replay all moves
+        if (moves.length > 0) {
+            replayToIndex(moves.length - 1);
+        } else {
+            render();
+            renderMovesListWithExpansion();
+        }
+
+        populateDetailsForm(data);
+        updateVariationUI();
+        updateCommentArea();
+
+        // Hide save button for non-owners
+        document.getElementById('btn-save-game').style.display = isGameOwner() ? '' : 'none';
+
+        // Switch to moves tab
+        switchTab('moves');
+        showToast('Game loaded!', 'success');
+    } catch (err) {
+        console.error('Load game error:', err);
+        showToast('Load failed: ' + err.message, 'error');
+    }
+}
+
+/* ===== Firebase: Delete Game ===== */
+function confirmDelete(gameId) {
+    const overlay = document.createElement('div');
+    overlay.className = 'confirm-overlay';
+    overlay.innerHTML = `
+        <div class="confirm-dialog">
+            <h3>Delete Game?</h3>
+            <p>This action cannot be undone. The game record will be permanently removed.</p>
+            <div class="btn-row">
+                <button class="btn-cancel" id="btn-cancel-del">Cancel</button>
+                <button class="btn-confirm" id="btn-confirm-del">Delete</button>
+            </div>
+        </div>`;
+    document.body.appendChild(overlay);
+
+    document.getElementById('btn-cancel-del').onclick = () => overlay.remove();
+    document.getElementById('btn-confirm-del').onclick = async () => {
+        overlay.remove();
+        await deleteGame(gameId);
+    };
+}
+
+async function deleteGame(gameId) {
+    try {
+        const collPath = `artifacts/${appId}/public/data/knowledge-base`;
+        await deleteDoc(doc(db, collPath, gameId));
+        if (loadedGameId === gameId) {
+            loadedGameId = null;
+            newGame();
+        }
+        await loadMyGames();
+        showToast('Game deleted', 'success');
+    } catch (err) {
+        console.error('Delete error:', err);
+        showToast('Delete failed: ' + err.message, 'error');
+    }
+}
+
+/* ===== Firebase: Toggle Visibility ===== */
+async function toggleVisibility(gameId, makePublic) {
+    try {
+        const collPath = `artifacts/${appId}/public/data/knowledge-base`;
+        await setDoc(doc(db, collPath, gameId), { isPublic: makePublic, updatedAt: Date.now() }, { merge: true });
+        await loadMyGames();
+        showToast(makePublic ? 'Game is now public' : 'Game is now private', 'info');
+    } catch (err) {
+        console.error('Toggle visibility error:', err);
+        showToast('Update failed: ' + err.message, 'error');
+    }
+}
+
+/* ===== Public Games + Voting ===== */
+async function loadPublicGames() {
+    if (!currentUser) return;
+    try {
+        const collPath = `artifacts/${appId}/public/data/knowledge-base`;
+        const q = query(collection(db, collPath), where('isPublic', '==', true));
+        const snapshot = await getDocs(q);
+        allPublicGames = [];
+        snapshot.forEach(d => { allPublicGames.push({ id: d.id, ...d.data() }); });
+        allPublicGames.sort((a, b) => {
+            const aScore = (a.thumbsUp?.length || 0) - (a.thumbsDown?.length || 0);
+            const bScore = (b.thumbsUp?.length || 0) - (b.thumbsDown?.length || 0);
+            if (aScore !== bScore) return bScore - aScore;
+            return (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0);
+        });
+        if (currentGamesView === 'public') renderPaginatedGames();
+    } catch (err) {
+        console.error('Load public games error:', err);
+    }
+}
+
+async function vote(gameId, voteType) {
+    if (!currentUser) return;
+    try {
+        const collPath = `artifacts/${appId}/public/data/knowledge-base`;
+        const docRef = doc(db, collPath, gameId);
+
+        // Find in cache to check current vote
+        const game = allPublicGames.find(g => g.id === gameId) || allMyGames.find(g => g.id === gameId);
+        if (!game) return;
+
+        const thumbsUp = game.thumbsUp || [];
+        const thumbsDown = game.thumbsDown || [];
+        const currentVote = thumbsUp.includes(currentUser.uid) ? 'up'
+                          : thumbsDown.includes(currentUser.uid) ? 'down'
+                          : null;
+
+        const updates = {};
+        if (voteType === 'up') {
+            if (currentVote === 'up') {
+                updates.thumbsUp = arrayRemove(currentUser.uid);
+            } else {
+                updates.thumbsUp = arrayUnion(currentUser.uid);
+                if (currentVote === 'down') updates.thumbsDown = arrayRemove(currentUser.uid);
+            }
+        } else {
+            if (currentVote === 'down') {
+                updates.thumbsDown = arrayRemove(currentUser.uid);
+            } else {
+                updates.thumbsDown = arrayUnion(currentUser.uid);
+                if (currentVote === 'up') updates.thumbsUp = arrayRemove(currentUser.uid);
+            }
+        }
+
+        await setDoc(docRef, updates, { merge: true });
+
+        // Update local cache immediately for responsiveness
+        if (voteType === 'up') {
+            if (currentVote === 'up') {
+                game.thumbsUp = thumbsUp.filter(uid => uid !== currentUser.uid);
+            } else {
+                if (!game.thumbsUp) game.thumbsUp = [];
+                game.thumbsUp.push(currentUser.uid);
+                if (currentVote === 'down') game.thumbsDown = (game.thumbsDown || []).filter(uid => uid !== currentUser.uid);
+            }
+        } else {
+            if (currentVote === 'down') {
+                game.thumbsDown = thumbsDown.filter(uid => uid !== currentUser.uid);
+            } else {
+                if (!game.thumbsDown) game.thumbsDown = [];
+                game.thumbsDown.push(currentUser.uid);
+                if (currentVote === 'up') game.thumbsUp = (game.thumbsUp || []).filter(uid => uid !== currentUser.uid);
+            }
+        }
+
+        renderPaginatedGames();
+        showToast(voteType === 'up' ? '👍 Vote recorded' : '👎 Vote recorded', 'info');
+    } catch (err) {
+        console.error('Vote error:', err);
+        showToast('Vote failed: ' + err.message, 'error');
+    }
+}
+
+/* ===== PGN Export ===== */
+function generateVariationPGN(v) {
+    let text = '(';
+    if (v.label) text += `{${v.label}} `;
+    const vICCS = v.movesICCS || [];
+    const vChinese = v.movesChinese || [];
+    const vComments = v.comments || {};
+    const vVariations = v.variations || {};
+    vICCS.forEach((vm, vi) => {
+        text += vm;
+        if (vChinese[vi]) text += ` {${vChinese[vi]}}`;
+        if (vComments[vi.toString()]) text += ` {${vComments[vi.toString()]}}`;
+        // Recurse into sub-variations at this move
+        if (vVariations[vi.toString()]) {
+            vVariations[vi.toString()].forEach(sv => {
+                text += ' ' + generateVariationPGN(sv);
+            });
+        }
+        if (vi < vICCS.length - 1) text += ' ';
+    });
+    text += ')';
+    return text;
+}
+
+function generatePGN(data) {
+    const resultMap = { 'red-win': '1-0', 'black-win': '0-1', 'draw': '1/2-1/2', 'no-result': '*' };
+    const result = resultMap[data.result] || '*';
+    const date = data.datePlayed ? data.datePlayed.replace(/-/g, '.') : '????.??.??';
+    const redPlayer = data.redPlayer || 'Red';
+    const blackPlayer = data.blackPlayer || 'Black';
+
+    // PGN headers
+    let pgn = '';
+    pgn += `[Game "Chinese Chess"]\n`;
+    pgn += `[Event "${data.gameTitle || data.openingName || 'Knowledge Base Game'}"]\n`;
+    pgn += `[Site "${data.location || 'SG Xiangqi'}"]\n`;
+    pgn += `[Date "${date}"]\n`;
+    pgn += `[Red "${redPlayer}"]\n`;
+    pgn += `[Black "${blackPlayer}"]\n`;
+    pgn += `[Result "${result}"]\n`;
+    if (data.openingName) pgn += `[Opening "${data.openingName}"]\n`;
+    pgn += `[FEN "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1"]\n`;
+    pgn += '\n';
+
+    // Move text with comments and variations
+    const iccs = data.movesICCS || [];
+    const chinese = data.movesChinese || [];
+    const gameComments = data.comments || {};
+    const gameVariations = data.variations || {};
+    let moveText = '';
+
+    for (let i = 0; i < iccs.length; i++) {
+        const moveNum = Math.floor(i / 2) + 1;
+        if (i % 2 === 0) {
+            moveText += `${moveNum}. `;
+        }
+
+        // Use ICCS notation as the primary move format, with Chinese as comment
+        moveText += iccs[i];
+
+        // Add Chinese notation as inline comment
+        if (chinese[i]) {
+            moveText += ` {${chinese[i]}}`;
+        }
+
+        // Add user comment
+        if (gameComments[i.toString()]) {
+            moveText += ` {${gameComments[i.toString()]}}`;
+        }
+
+        // Add variations (recursive)
+        if (gameVariations[i.toString()]) {
+            const vars = gameVariations[i.toString()];
+            vars.forEach(v => {
+                moveText += ' ' + generateVariationPGN(v);
+            });
+        }
+
+        moveText += ' ';
+    }
+
+    moveText += result;
+    pgn += moveText.trim() + '\n';
+    return pgn;
+}
+
+async function exportPGN(gameId) {
+    // Find game from allMyGames cache or load from Firebase
+    let gameData = allMyGames.find(g => g.id === gameId);
+    if (!gameData) {
+        try {
+            const collPath = `artifacts/${appId}/public/data/knowledge-base`;
+            const snap = await getDoc(doc(db, collPath, gameId));
+            if (!snap.exists()) { showToast('Game not found', 'error'); return; }
+            gameData = snap.data();
+        } catch (err) {
+            showToast('Failed to load game for export', 'error');
+            return;
+        }
+    }
+
+    const pgn = generatePGN(gameData);
+    const filename = (gameData.gameTitle || gameData.openingName || 'xiangqi_game').replace(/[^a-zA-Z0-9_\-\s]/g, '').replace(/\s+/g, '_') + '.pgn';
+
+    // Download as file
+    const blob = new Blob([pgn], { type: 'application/x-chess-pgn' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast(`Exported as ${filename}`, 'success');
+}
+
+function exportCurrentGamePGN() {
+    if (moves.length === 0) { showToast('No moves to export', 'error'); return; }
+    const details = getDetailsFromForm();
+    const data = {
+        ...details,
+        moves: moves,
+        movesICCS: movesICCS,
+        movesChinese: movesChinese,
+        comments: comments,
+        variations: variations
+    };
+    const pgn = generatePGN(data);
+    const filename = (details.gameTitle || details.openingName || 'xiangqi_game').replace(/[^a-zA-Z0-9_\-\s]/g, '').replace(/\s+/g, '_') + '.pgn';
+
+    const blob = new Blob([pgn], { type: 'application/x-chess-pgn' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast(`Exported as ${filename}`, 'success');
+}
+
+/* ===== Tabs ===== */
+function switchTab(name) {
+    document.querySelectorAll('.sidebar-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+    document.querySelector(`.sidebar-tab[data-tab="${name}"]`).classList.add('active');
+    document.getElementById('tab-' + name).classList.add('active');
+}
+
+/* ===== Search ===== */
+function filterGames(searchText) {
+    const text = searchText.toLowerCase();
+    const sourceGames = currentGamesView === 'mine' ? allMyGames : allPublicGames;
+    if (!text) {
+        currentPage = 1;
+        renderPaginatedGames();
+        return;
+    }
+    const filtered = sourceGames.filter(g => {
+        const fields = [
+            g.gameTitle, g.redPlayer, g.blackPlayer, g.openingName,
+            g.location, g.createdByName, ...(g.keywords || [])
+        ].filter(Boolean).map(f => f.toLowerCase());
+        return fields.some(f => f.includes(text));
+    });
+    currentPage = 1;
+    const totalPages = Math.ceil(filtered.length / gamesPerPage) || 1;
+    const pageGames = filtered.slice(0, gamesPerPage);
+    document.getElementById('my-games-count').textContent = filtered.length;
+    renderGameCards(pageGames);
+    renderPaginationControls(totalPages);
+}
+
+/* ===== Toast ===== */
+function showToast(message, type = 'info') {
+    const t = document.createElement('div');
+    t.className = `toast toast-${type}`;
+    t.textContent = message;
+    document.body.appendChild(t);
+    setTimeout(() => t.remove(), 3000);
+}
+
+/* ===== Wire Up Events ===== */
+document.getElementById('btn-first').onclick = goFirst;
+document.getElementById('btn-prev').onclick = goPrev;
+document.getElementById('btn-next').onclick = goNext;
+document.getElementById('btn-last').onclick = goLast;
+document.getElementById('btn-undo').onclick = undoLastMove;
+document.getElementById('btn-flip').onclick = () => {
+    boardFlipped = !boardFlipped;
+    clearHints();
+    selectedPiece = null;
+    render();
+};
+document.getElementById('btn-rotate').onclick = () => {
+    boardRotated = !boardRotated;
+    clearHints();
+    selectedPiece = null;
+    render();
+};
+document.getElementById('btn-new').onclick = newGame;
+
+document.getElementById('btn-save-game').onclick = saveGame;
+document.getElementById('btn-export-game').onclick = exportCurrentGamePGN;
+document.getElementById('btn-add-variation').onclick = startVariation;
+document.getElementById('btn-end-variation').onclick = endVariation;
+document.getElementById('btn-back-main-line').onclick = exitVariationView;
+document.getElementById('btn-undo-var-move').onclick = undoVariationMove;
+document.getElementById('btn-swap-notation').onclick = toggleNotation;
+document.getElementById('btn-expand-all').onclick = expandAll;
+document.getElementById('btn-collapse-all').onclick = collapseAll;
+
+document.getElementById('comment-input').addEventListener('blur', saveComment);
+document.getElementById('comment-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        saveComment();
+    }
+});
+
+document.querySelectorAll('.sidebar-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+        switchTab(tab.dataset.tab);
+    });
+});
+
+document.getElementById('search-games').addEventListener('input', (e) => {
+    filterGames(e.target.value);
+});
+
+initOpeningAutocomplete();
+
+// View toggle (My Games / Public Games)
+document.querySelectorAll('.view-toggle-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+        const newView = e.target.dataset.view;
+        if (newView === currentGamesView) return;
+        document.querySelectorAll('.view-toggle-btn').forEach(b => b.classList.remove('active'));
+        e.target.classList.add('active');
+        currentGamesView = newView;
+        currentPage = 1;
+        document.getElementById('search-games').value = '';
+        if (newView === 'public') {
+            document.getElementById('view-count-label').textContent = 'Total';
+            document.getElementById('view-count-unit').textContent = 'public games';
+            if (allPublicGames.length === 0) {
+                document.getElementById('games-list').innerHTML = '<div style="text-align:center; color:#94a3b8; padding:30px;">Loading public games...</div>';
+                await loadPublicGames();
+            } else {
+                renderPaginatedGames();
+            }
+        } else {
+            document.getElementById('view-count-label').textContent = 'You have';
+            document.getElementById('view-count-unit').textContent = 'games';
+            renderPaginatedGames();
+        }
+    });
+});
+
+// Keyboard navigation
+document.addEventListener('keydown', (e) => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
+    switch (e.key) {
+        case 'ArrowLeft': goPrev(); break;
+        case 'ArrowRight': goNext(); break;
+        case 'Home': goFirst(); break;
+        case 'End': goLast(); break;
+    }
+});
+
+/* ===== Expose to global for onclick handlers ===== */
+window.kbApp = {
+    loadGame,
+    confirmDelete,
+    toggleVisibility,
+    exportPGN,
+    vote
+};
+
+/* ===== Init ===== */
+onAuthStateChanged(auth, async (user) => {
+    if (!user) {
+        window.location.href = '../lobby/lobby.html';
+        return;
+    }
+    currentUser = user;
+
+    // Load user profile
+    try {
+        const profileRef = doc(db, `artifacts/${appId}/users/${user.uid}/profile/data`);
+        const profileSnap = await getDoc(profileRef);
+        if (profileSnap.exists()) {
+            userProfile = profileSnap.data();
+            pieceSet = userProfile.pieceSet || 'ivory';
+            boardSet = userProfile.boardSet || 'classic';
+        }
+    } catch (err) {
+        console.warn('Could not load profile:', err);
+    }
+
+    // Apply board style
+    applyBoardStyle(boardSet);
+
+    // Initial render
+    render();
+    updateTurnIndicator();
+    updateCommentArea();
+    updateVariationUI();
+
+    // Load saved games
+    await loadMyGames();
+
+    // Hide loader
+    document.getElementById('loader').style.display = 'none';
+});
+</script>
+</body>
+</html>

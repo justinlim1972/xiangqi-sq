@@ -246,6 +246,89 @@
         .p-black { background: #111 !important; color: white !important; border-left: 3px solid #3b82f6 !important; }
         .p-observer { background: #1a1a1a !important; color: #999 !important; }
 
+        /* QUEUE SYSTEM */
+        .queue-header {
+            background: #0a0a0a; padding: 10px 12px; border-radius: 8px;
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 12px; border: 1px solid #222;
+        }
+        .queue-header span:first-child {
+            font-size: 0.7rem; color: var(--gold); font-weight: 900; letter-spacing: 1px;
+        }
+        .queue-header span:last-child {
+            font-size: 0.65rem; color: #888; font-weight: 700;
+        }
+        .btn-queue-join {
+            background: #27ae60 !important; color: white; padding: 12px;
+            font-size: 0.85rem !important; border-radius: 8px;
+        }
+        .btn-queue-join:hover { background: #2ecc71 !important; }
+        .btn-queue-leave {
+            background: #c0392b !important; color: white; padding: 12px;
+            font-size: 0.85rem !important; border-radius: 8px;
+        }
+        .btn-queue-leave:hover { background: #e74c3c !important; }
+        .queue-my-pos {
+            background: #1a3a5c; border: 1px solid #2980b9; border-radius: 8px;
+            padding: 10px 14px; text-align: center; color: #3498db;
+            font-weight: 900; font-size: 0.85rem; margin-top: 8px;
+        }
+        .queue-status-msg {
+            text-align: center; color: #666; font-size: 0.75rem;
+            padding: 6px 0; font-weight: 700;
+        }
+        .queue-list-container {
+            flex: 1; overflow-y: auto; min-height: 0;
+        }
+        .queue-list {
+            background: #0a0a0a; border: 1px solid #222; border-radius: 8px;
+            overflow: hidden;
+        }
+        .queue-empty {
+            text-align: center; color: #555; padding: 30px 15px;
+            font-size: 0.8rem; font-style: italic;
+        }
+        .queue-item {
+            display: flex; align-items: center; gap: 10px;
+            padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.06);
+            transition: 0.2s;
+        }
+        .queue-item:last-child { border-bottom: none; }
+        .queue-item.queue-item-me { background: #1a2a3a; }
+        .queue-num {
+            width: 28px; height: 28px; border-radius: 50%;
+            background: var(--gold); color: #000; font-weight: 900;
+            font-size: 0.75rem; display: flex; align-items: center;
+            justify-content: center; flex-shrink: 0;
+        }
+        .queue-item-info {
+            flex: 1; display: flex; flex-direction: column;
+        }
+        .queue-item-name {
+            font-weight: 900; font-size: 0.8rem; color: #eee;
+            text-transform: uppercase;
+        }
+        .queue-item-elo {
+            font-size: 0.6rem; color: #666; margin-top: 2px;
+        }
+        .queue-item-time {
+            font-size: 0.6rem; color: #555;
+        }
+        .queue-rules {
+            background: #0a0a0a; border: 1px solid #222; border-radius: 8px;
+            padding: 12px; margin-top: 12px; flex-shrink: 0;
+        }
+        .queue-rules-title {
+            font-size: 0.6rem; color: var(--gold); font-weight: 900;
+            letter-spacing: 1px; margin-bottom: 8px;
+        }
+        .queue-rules ul {
+            margin: 0; padding-left: 16px;
+        }
+        .queue-rules li {
+            font-size: 0.65rem; color: #666; line-height: 1.6;
+        }
+
         /* BUTTONS */
         .btn-action { 
             width: 100%; padding: 12px; border-radius: 8px; border: none; 
@@ -315,6 +398,17 @@
             color: white; box-shadow: 0 0 15px rgba(205, 51, 51, 0.4);
         }
 
+        /* Voice Type Selector */
+        .voice-type-btn:hover {
+            background: #252525 !important; border-color: #555 !important;
+        }
+        .voice-type-btn.active {
+            border-color: var(--gold) !important;
+            background: #2a2200 !important;
+            color: var(--gold) !important;
+            box-shadow: 0 0 12px rgba(241, 196, 15, 0.3);
+        }
+
         #loader { 
             position: fixed; top:0; left:0; width:100%; height:100%; 
             background: #05080c; z-index: 9999; display: flex; 
@@ -329,6 +423,10 @@
         @keyframes pulse {
             0%, 100% { box-shadow: 0 0 15px rgba(241, 196, 15, 0.4); }
             50% { box-shadow: 0 0 30px rgba(241, 196, 15, 0.8); }
+        }
+        @keyframes idlePulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(1.1); }
         }
         @keyframes stress-pulse {
             0%, 100% {
@@ -568,7 +666,8 @@
     <div class="sidebar-tabs">
         <button class="sidebar-tab active" id="tab-btn-game" onclick="app.switchTab('game')">GAME</button>
         <button class="sidebar-tab" id="tab-btn-moves" onclick="app.switchTab('moves')">MOVES</button>
-        <button class="sidebar-tab" id="tab-btn-settings" onclick="app.switchTab('settings')">SETTINGS</button>
+        <button class="sidebar-tab" id="tab-btn-queue" onclick="app.switchTab('queue')">QUEUE</button>
+        <button class="sidebar-tab" id="tab-btn-settings" onclick="app.switchTab('settings')">⚙️</button>
     </div>
 
     <!-- GAME TAB CONTENT -->
@@ -581,6 +680,7 @@
                 <div style="flex-grow: 1; display: flex; align-items: center; gap: 8px;">
                     <span id="name-black">Empty Slot</span>
                     <span id="owner-badge-black" style="display: none; font-size: 1.2rem; filter: drop-shadow(0 0 8px rgba(241, 196, 15, 0.8));" title="Table Owner">👑</span>
+                    <span id="idle-badge-black" style="display: none; font-size: 1rem; animation: idlePulse 1s infinite;" title="Idle Warning">⏰</span>
                 </div>
             </div>
             <div id="black-timer" style="
@@ -603,6 +703,7 @@
                 <div style="flex-grow: 1; display: flex; align-items: center; gap: 8px;">
                     <span id="name-red">Empty Slot</span>
                     <span id="owner-badge-red" style="display: none; font-size: 1.2rem; filter: drop-shadow(0 0 8px rgba(241, 196, 15, 0.8));" title="Table Owner">👑</span>
+                    <span id="idle-badge-red" style="display: none; font-size: 1rem; animation: idlePulse 1s infinite;" title="Idle Warning">⏰</span>
                 </div>
             </div>
             <div id="red-timer" style="
@@ -624,6 +725,17 @@
         <div id="action-menu" style="display: none; margin-top: 10px; background: #0a0a0a; border: 2px solid var(--gold); border-radius: 12px; padding: 10px; position: relative; z-index: 100;">
             <div id="action-menu-title" style="color: var(--gold); font-size: 0.7rem; font-weight: 800; text-align: center; margin-bottom: 8px; letter-spacing: 1px;"></div>
             <div id="action-menu-buttons" style="display: flex; flex-direction: column; gap: 6px;"></div>
+        </div>
+
+        <!-- Idle Warning Modal -->
+        <div id="idle-warning-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 9999; justify-content: center; align-items: center;">
+            <div style="background: linear-gradient(135deg, #1a1a2e, #16213e); border: 3px solid #e74c3c; border-radius: 20px; padding: 30px 40px; text-align: center; max-width: 400px; animation: idlePulse 1s infinite;">
+                <div style="font-size: 4rem; margin-bottom: 10px;">⏰</div>
+                <h2 style="color: #e74c3c; font-size: 1.3rem; margin-bottom: 8px; font-weight: 900; letter-spacing: 2px;">IDLE WARNING</h2>
+                <p style="color: #eee; font-size: 0.95rem; margin-bottom: 15px; line-height: 1.5;">You will be removed from your seat for inactivity in</p>
+                <div id="idle-countdown" style="font-size: 4rem; font-weight: 900; color: #e74c3c; font-family: 'Courier New', monospace; margin-bottom: 20px; text-shadow: 0 0 30px rgba(231, 76, 60, 0.8);">30</div>
+                <button id="btn-dismiss-idle" style="background: linear-gradient(135deg, #27ae60, #2ecc71); color: white; padding: 15px 40px; font-size: 1.1rem; border-radius: 12px; border: none; cursor: pointer; font-weight: 900; letter-spacing: 1px; transition: 0.2s; box-shadow: 0 4px 15px rgba(39,174,96,0.4);">✋ I'M HERE</button>
+            </div>
         </div>
 
         <!-- Draw Offer Modal (restricted to sidebar area) -->
@@ -721,6 +833,48 @@
     </div>
     <!-- END MOVES TAB -->
 
+    <!-- QUEUE TAB CONTENT -->
+    <div id="tab-content-queue" class="tab-content" style="display: none;">
+        <div style="padding: 15px; display: flex; flex-direction: column; height: 100%;">
+            <!-- Queue Header -->
+            <div class="queue-header">
+                <span>🎯 GAME QUEUE</span>
+                <span id="queue-count">0 waiting</span>
+            </div>
+
+            <!-- Queue Action Button -->
+            <div id="queue-action-area" style="margin-bottom: 12px;">
+                <button class="btn-action btn-queue-join" id="btn-join-queue" onclick="app.joinQueue()" style="display:none;">
+                    🎫 JOIN QUEUE
+                </button>
+                <button class="btn-action btn-queue-leave" id="btn-leave-queue" onclick="app.leaveQueue()" style="display:none;">
+                    ❌ GIVE UP QUEUE
+                </button>
+                <div id="queue-my-position" class="queue-my-pos" style="display:none;"></div>
+                <div id="queue-status-msg" class="queue-status-msg"></div>
+            </div>
+
+            <!-- Queue List -->
+            <div class="queue-list-container">
+                <div id="queue-list" class="queue-list">
+                    <div class="queue-empty">No one in queue. Join to play next!</div>
+                </div>
+            </div>
+
+            <!-- Queue Rules -->
+            <div class="queue-rules">
+                <div class="queue-rules-title">📋 QUEUE RULES</div>
+                <ul>
+                    <li>When a game ends with a winner, the loser's seat goes to Queue #1</li>
+                    <li>Draw games — both players keep their seats</li>
+                    <li>Leaving the page removes you from the queue</li>
+                    <li>You can give up your queue position anytime</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+    <!-- END QUEUE TAB -->
+
     <!-- SETTINGS TAB CONTENT -->
     <div id="tab-content-settings" class="tab-content" style="display: none;">
         <div style="padding: 20px;">
@@ -758,6 +912,46 @@
                     <button class="setting-toggle" id="setting-music-off" onclick="app.setSetting('music', false)">OFF</button>
                 </div>
                 <div style="font-size: 0.7rem; color: #666; margin-top: 8px; line-height: 1.4;">Background music plays while you're in the game room.</div>
+            </div>
+
+            <!-- Voice Chat (TTS) -->
+            <div style="margin-bottom: 25px;">
+                <div style="font-size: 0.9rem; font-weight: 700; color: #eee; margin-bottom: 10px; display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 1.2rem;">🔊</span> Voice Chat (TTS)
+                </div>
+                <div style="display: flex; gap: 10px;">
+                    <button class="setting-toggle" id="setting-voiceChat-on" onclick="app.setSetting('voiceChat', true)">ON</button>
+                    <button class="setting-toggle active" id="setting-voiceChat-off" onclick="app.setSetting('voiceChat', false)">OFF</button>
+                </div>
+                <div style="font-size: 0.7rem; color: #666; margin-top: 8px; line-height: 1.4;">
+                    Wrap text in parentheses to speak aloud: <strong style="color:#f1c40f;">(Hello)</strong> for English, <strong style="color:#f1c40f;">(你好)</strong> for Mandarin. Both half-width () and full-width （） brackets work.
+                </div>
+
+                <!-- Voice Character Selector -->
+                <div style="font-size: 0.75rem; font-weight: 700; color: #ccc; margin-top: 12px; margin-bottom: 8px;">Choose Your Voice:</div>
+                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;">
+                    <button class="voice-type-btn active" id="voice-type-young-lady" onclick="app.setVoiceType('young-lady')" style="background: #1a1a1a; border: 2px solid #333; border-radius: 8px; padding: 8px 4px; cursor: pointer; color: #ccc; font-size: 0.65rem; font-weight: 700; transition: all 0.3s; text-align: center;">
+                        <div style="font-size: 1.4rem;">👩</div>Young Lady
+                    </button>
+                    <button class="voice-type-btn" id="voice-type-young-man" onclick="app.setVoiceType('young-man')" style="background: #1a1a1a; border: 2px solid #333; border-radius: 8px; padding: 8px 4px; cursor: pointer; color: #ccc; font-size: 0.65rem; font-weight: 700; transition: all 0.3s; text-align: center;">
+                        <div style="font-size: 1.4rem;">👨</div>Young Man
+                    </button>
+                    <button class="voice-type-btn" id="voice-type-old-auntie" onclick="app.setVoiceType('old-auntie')" style="background: #1a1a1a; border: 2px solid #333; border-radius: 8px; padding: 8px 4px; cursor: pointer; color: #ccc; font-size: 0.65rem; font-weight: 700; transition: all 0.3s; text-align: center;">
+                        <div style="font-size: 1.4rem;">👵</div>Old Auntie
+                    </button>
+                    <button class="voice-type-btn" id="voice-type-old-man" onclick="app.setVoiceType('old-man')" style="background: #1a1a1a; border: 2px solid #333; border-radius: 8px; padding: 8px 4px; cursor: pointer; color: #ccc; font-size: 0.65rem; font-weight: 700; transition: all 0.3s; text-align: center;">
+                        <div style="font-size: 1.4rem;">👴</div>Old Man
+                    </button>
+                    <button class="voice-type-btn" id="voice-type-girl" onclick="app.setVoiceType('girl')" style="background: #1a1a1a; border: 2px solid #333; border-radius: 8px; padding: 8px 4px; cursor: pointer; color: #ccc; font-size: 0.65rem; font-weight: 700; transition: all 0.3s; text-align: center;">
+                        <div style="font-size: 1.4rem;">👧</div>Small Girl
+                    </button>
+                    <button class="voice-type-btn" id="voice-type-boy" onclick="app.setVoiceType('boy')" style="background: #1a1a1a; border: 2px solid #333; border-radius: 8px; padding: 8px 4px; cursor: pointer; color: #ccc; font-size: 0.65rem; font-weight: 700; transition: all 0.3s; text-align: center;">
+                        <div style="font-size: 1.4rem;">👦</div>Small Boy
+                    </button>
+                    <button class="voice-type-btn" id="voice-type-baby" onclick="app.setVoiceType('baby')" style="background: #1a1a1a; border: 2px solid #333; border-radius: 8px; padding: 8px 4px; cursor: pointer; color: #ccc; font-size: 0.65rem; font-weight: 700; transition: all 0.3s; text-align: center;">
+                        <div style="font-size: 1.4rem;">👶</div>Baby
+                    </button>
+                </div>
             </div>
 
             <!-- Auto-Save Games -->
@@ -829,7 +1023,7 @@
 <script src="./debug-logger.js"></script>
 
 <script type="module">
-    import { XQApp } from "./xq-app-FIX-INCREMENT.js?v=208&t=1770700003";
+    import { XQApp } from "./xq-app-FIX-INCREMENT.js?v=219";
     // Initialize the Orchestrator which manages all modules (Engine, UI, Firebase)
     window.app = new XQApp();
     window.app.init();
@@ -850,6 +1044,11 @@
 
     document.getElementById('btn-reject-battle-modal').onclick = () => {
         window.app.rejectBattleRequest();
+    };
+
+    // Wire up idle warning dismiss button
+    document.getElementById('btn-dismiss-idle').onclick = () => {
+        window.app.dismissIdleWarning();
     };
 </script>
 

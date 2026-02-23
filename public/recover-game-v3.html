@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Recover Game v3 - Direct Fix</title>
+    <style>
+        body { font-family: monospace; padding: 20px; background: #1e293b; color: white; max-width: 900px; margin: 0 auto; }
+        h1 { color: #10b981; }
+        .info { color: #3b82f6; background: #1e3a8a; padding: 15px; margin: 15px 0; border-radius: 8px; }
+        .success { color: #10b981; background: #064e3b; padding: 15px; margin: 15px 0; border-radius: 8px; font-weight: bold; }
+        .error { color: #ef4444; background: #7f1d1d; padding: 15px; margin: 15px 0; border-radius: 8px; }
+        .warning { color: #f59e0b; background: #78350f; padding: 15px; margin: 15px 0; border-radius: 8px; border: 2px solid #f59e0b; }
+        button { padding: 15px 30px; margin: 10px 5px; font-size: 18px; cursor: pointer; color: white; border: none; border-radius: 8px; font-weight: bold; }
+        .btn-preview { background: #3b82f6; }
+        .btn-recover { background: #10b981; }
+        .btn-preview:hover { background: #2563eb; }
+        .btn-recover:hover { background: #059669; }
+        pre { background: #0f172a; padding: 15px; border-radius: 8px; overflow-x: auto; font-size: 11px; max-height: 400px; overflow-y: auto; }
+    </style>
+</head>
+<body>
+    <h1>🔧 Recover Game v3 - Direct Read & Save</h1>
+
+    <div class="warning">
+        <strong>Step 1:</strong> Click PREVIEW to see the game data in Firestore<br>
+        <strong>Step 2:</strong> Click RECOVER to save game record + update ELO + update leaderboard
+    </div>
+
+    <button class="btn-preview" onclick="previewGame()">👁️ STEP 1: PREVIEW</button>
+    <button class="btn-recover" onclick="recoverGame()">🎯 STEP 2: RECOVER</button>
+
+    <div id="output"></div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc, getDocs, collection } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { eloSystem } from './game/elo-system.js';
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyDq_LECOrc4SY90SyDsBQGmwl-YnUNFIj8",
+            authDomain: "xiangqi-sq.firebaseapp.com",
+            projectId: "xiangqi-sq",
+            storageBucket: "xiangqi-sq.firebasestorage.app",
+            messagingSenderId: "351923336298",
+            appId: "1:351923336298:web:e7278ea095ba085ac4935b"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = "sg-xiangqi";
+
+        // TABLE where the game was played
+        const TABLE_ID = "pJKq5Rpf7mEmkcX4AmZo";
+        const REGION_ID = "74hFIMWHF3eKzLxl9ZX0";
+
+        let loggedIn = false;
+
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                loggedIn = true;
+                document.getElementById('output').innerHTML = '<p class="info">✅ Logged in as: ' + user.email + '</p>';
+            } else {
+                window.location.href = 'index.html';
+            }
+        });
+
+        function log(msg, type = 'info') {
+            const output = document.getElementById('output');
+            output.innerHTML += `<p class="${type}">${msg}</p>`;
+        }
+
+        // ============ PREVIEW ============
+        window.previewGame = async function() {
+            document.getElementById('output').innerHTML = '';
+            log('🔍 Reading game document...', 'info');
+
+            try {
+                // 1. Read game doc
+                const gameRef = doc(db, 'artifacts', appId, 'public', 'data', 'games', TABLE_ID);
+                const gameSnap = await getDoc(gameRef);
+
+                if (!gameSnap.exists()) {
+                    log('❌ Game document NOT FOUND at path: artifacts/' + appId + '/public/data/games/' + TABLE_ID, 'error');
+                    return;
+                }
+
+                const g = gameSnap.data();
+                log('✅ Game document found!', 'success');
+
+                // Show all keys
+                const keys = Object.keys(g);
+                log(`📋 Fields: ${keys.join(', ')}`, 'info');
+                log(`Status: ${g.status}`, 'info');
+                log(`Winner: ${g.winner || 'none'}`, 'info');
+                log(`Reason: ${g.reason || 'none'}`, 'info');
+                log(`Board present: ${!!g.board}`, 'info');
+                log(`History length: ${(g.history || []).length}`, 'info');
+                log(`MoveHistory length: ${(g.moveHistory || []).length}`, 'info');
+                log(`PlayerRed in game doc: ${JSON.stringify(g.playerRed || 'NOT SET')}`, 'info');
+                log(`PlayerBlack in game doc: ${JSON.stringify(g.playerBlack || 'NOT SET')}`, 'info');
+                log(`Started: ${g.startedAt ? new Date(g.startedAt).toLocaleString() : 'N/A'}`, 'info');
+                log(`Finished: ${g.finishedAt ? new Date(g.finishedAt).toLocaleString() : 'N/A'}`, 'info');
+
+                // Show history
+                if ((g.history || []).length > 0) {
+                    log(`📋 First 3 history entries:`, 'success');
+                    const preview = g.history.slice(0, 3);
+                    document.getElementById('output').innerHTML += `<pre>${JSON.stringify(preview, null, 2)}</pre>`;
+                }
+
+                // 2. Read table doc
+                log('🔍 Reading table document...', 'info');
+                const tableRef = doc(db, 'artifacts', appId, 'public', 'data', 'regions', REGION_ID, 'tables', TABLE_ID);
+                const tableSnap = await getDoc(tableRef);
+                if (tableSnap.exists()) {
+                    const t = tableSnap.data();
+                    log(`Table playerRed: ${JSON.stringify(t.playerRed || 'NOT SET')}`, 'info');
+                    log(`Table playerBlack: ${JSON.stringify(t.playerBlack || 'NOT SET')}`, 'info');
+                    log(`Table occupants: ${JSON.stringify(t.occupants || [])}`, 'info');
+                } else {
+                    log('Table document not found', 'warning');
+                }
+
+                // 3. Scan ALL usernames to find CHSprimary and supersushi
+                log('🔍 Scanning usernames registry...', 'info');
+                const usernamesRef = collection(db, 'artifacts', appId, 'public', 'data', 'usernames');
+                const usernamesSnap = await getDocs(usernamesRef);
+                log(`Found ${usernamesSnap.size} usernames`, 'info');
+
+                let allUsernames = [];
+                usernamesSnap.forEach(d => {
+                    const data = d.data();
+                    allUsernames.push({ docId: d.id, username: data.username, uid: data.uid });
+                });
+                document.getElementById('output').innerHTML += `<pre>${JSON.stringify(allUsernames, null, 2)}</pre>`;
+
+                log('✅ Preview complete. Check data above, then click RECOVER.', 'success');
+
+            } catch (error) {
+                log(`❌ Error: ${error.message}`, 'error');
+                console.error(error);
+            }
+        };
+
+        // ============ RECOVER ============
+        window.recoverGame = async function() {
+            document.getElementById('output').innerHTML = '';
+            log('🔄 Starting recovery...', 'info');
+
+            try {
+                // 1. Read game doc
+                const gameRef = doc(db, 'artifacts', appId, 'public', 'data', 'games', TABLE_ID);
+                const gameSnap = await getDoc(gameRef);
+
+                if (!gameSnap.exists()) {
+                    log('❌ Game document not found!', 'error');
+                    return;
+                }
+
+                const g = gameSnap.data();
+                const history = g.history || [];
+                const moveHistory = g.moveHistory || [];
+                log(`✅ Game data: ${history.length} history, ${moveHistory.length} moveHistory, winner=${g.winner}, status=${g.status}`, 'success');
+
+                // 2. Find player UIDs - try ALL methods
+                let redUid = null, blackUid = null;
+                let redName = 'CHSprimary', blackName = 'supersushi';
+
+                // Method A: from game doc
+                if (g.playerRed?.uid) { redUid = g.playerRed.uid; redName = g.playerRed.name || g.playerRed.playerName || redName; }
+                if (g.playerBlack?.uid) { blackUid = g.playerBlack.uid; blackName = g.playerBlack.name || g.playerBlack.playerName || blackName; }
+                log(`After game doc: red=${redUid}, black=${blackUid}`, 'info');
+
+                // Method B: from table doc
+                if (!redUid || !blackUid) {
+                    const tableRef = doc(db, 'artifacts', appId, 'public', 'data', 'regions', REGION_ID, 'tables', TABLE_ID);
+                    const tableSnap = await getDoc(tableRef);
+                    if (tableSnap.exists()) {
+                        const t = tableSnap.data();
+                        if (!redUid && t.playerRed?.uid) { redUid = t.playerRed.uid; redName = t.playerRed.name || redName; }
+                        if (!blackUid && t.playerBlack?.uid) { blackUid = t.playerBlack.uid; blackName = t.playerBlack.name || blackName; }
+                    }
+                    log(`After table doc: red=${redUid}, black=${blackUid}`, 'info');
+                }
+
+                // Method C: from usernames registry
+                if (!redUid || !blackUid) {
+                    const usernamesRef = collection(db, 'artifacts', appId, 'public', 'data', 'usernames');
+                    const usernamesSnap = await getDocs(usernamesRef);
+                    usernamesSnap.forEach(d => {
+                        const data = d.data();
+                        const nameLower = (data.username || d.id).toLowerCase();
+                        if (!redUid && nameLower === 'chsprimary') { redUid = data.uid; redName = data.username || d.id; }
+                        if (!blackUid && nameLower === 'supersushi') { blackUid = data.uid; blackName = data.username || d.id; }
+                    });
+                    log(`After usernames: red=${redUid}, black=${blackUid}`, 'info');
+                }
+
+                // Method D: hardcoded fallback (from recover-winning-game.html)
+                // CHSPrimary = 7Ab3sPTyZRNCdkmeYDzOOlq4Tn2
+                // supersushi / 行百里半九十 = OQXCLt4YmlXFoTGLD4MvpRN5utc2
+                if (!redUid) { redUid = "7Ab3sPTyZRNCdkmeYDzOOlq4Tn2"; log('⚠️ Using hardcoded UID for CHSprimary (red)', 'warning'); }
+                if (!blackUid) { blackUid = "OQXCLt4YmlXFoTGLD4MvpRN5utc2"; log('⚠️ Using hardcoded UID for supersushi (black)', 'warning'); }
+
+                log(`✅ Red: ${redName} (${redUid})`, 'success');
+                log(`✅ Black: ${blackName} (${blackUid})`, 'success');
+
+                // 3. Get current ELO
+                const redProfileRef = doc(db, 'artifacts', appId, 'users', redUid, 'profile', 'data');
+                const blackProfileRef = doc(db, 'artifacts', appId, 'users', blackUid, 'profile', 'data');
+                const [redSnap, blackSnap] = await Promise.all([getDoc(redProfileRef), getDoc(blackProfileRef)]);
+                const redProfile = redSnap.exists() ? redSnap.data() : {};
+                const blackProfile = blackSnap.exists() ? blackSnap.data() : {};
+
+                const redELO = redProfile.elo || 1200;
+                const blackELO = blackProfile.elo || 1200;
+                const redGames = redProfile.gamesPlayed || 0;
+                const blackGames = blackProfile.gamesPlayed || 0;
+
+                log(`📊 Red ELO: ${redELO} (${redGames} games)`, 'info');
+                log(`📊 Black ELO: ${blackELO} (${blackGames} games)`, 'info');
+
+                // 4. Calculate ELO
+                const winner = g.winner || 'black';
+                const reason = g.reason || 'resignation';
+
+                const eloChanges = eloSystem.calculateGameRatings({
+                    redPlayer: { uid: redUid, elo: redELO, gamesPlayed: redGames },
+                    blackPlayer: { uid: blackUid, elo: blackELO, gamesPlayed: blackGames },
+                    winner: winner
+                });
+
+                log(`🎯 ELO: Red ${redELO}→${eloChanges.red.newRating} (${eloChanges.red.change > 0 ? '+' : ''}${eloChanges.red.change})`, 'info');
+                log(`🎯 ELO: Black ${blackELO}→${eloChanges.black.newRating} (${eloChanges.black.change > 0 ? '+' : ''}${eloChanges.black.change})`, 'info');
+
+                // 5. Build move arrays
+                let movesICCS = [];
+                if (history.length > 0) {
+                    history.forEach(h => {
+                        if (typeof h === 'string') movesICCS.push(h);
+                        else if (h?.move) movesICCS.push(h.move);
+                        else if (h?.iccs) movesICCS.push(h.iccs);
+                        else if (h?.from && h?.to) movesICCS.push(`${h.from.x}${h.from.y}-${h.to.x}${h.to.y}`);
+                    });
+                }
+
+                let movesChinese = [];
+                if (moveHistory.length > 0) {
+                    moveHistory.forEach(m => {
+                        if (typeof m === 'string') movesChinese.push(m);
+                        else if (m?.chinese) movesChinese.push(m.chinese);
+                        else if (m?.text) movesChinese.push(m.text);
+                        else if (m?.notation) movesChinese.push(m.notation);
+                    });
+                }
+
+                const totalMoves = Math.max(history.length, moveHistory.length);
+                log(`📋 ${totalMoves} moves (${movesICCS.length} ICCS, ${movesChinese.length} Chinese)`, 'success');
+
+                // 6. Build game record
+                const gameEndTime = g.finishedAt || Date.now();
+                const gameStartTime = g.startedAt || gameEndTime;
+                const gameId = `RECOVERED_V3_${gameEndTime}`;
+
+                const gameRecord = {
+                    gameId: gameId,
+                    tableId: TABLE_ID,
+                    regionId: REGION_ID,
+                    playerRed: { uid: redUid, playerName: redName },
+                    playerBlack: { uid: blackUid, playerName: blackName },
+                    winner: winner,
+                    reason: reason,
+                    completedAt: gameEndTime,
+                    startedAt: gameStartTime,
+                    movesICCS: movesICCS,
+                    movesChinese: movesChinese,
+                    rawHistory: history,
+                    rawMoveHistory: moveHistory,
+                    fenStart: "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1",
+                    totalMoves: totalMoves,
+                    duration: gameEndTime - gameStartTime,
+                    source: "pc",
+                    recovered: true,
+                    recoveryNote: "Recovered with v3 tool - includes raw game data from Firestore",
+                    eloChanges: {
+                        red: { oldRating: eloChanges.red.oldRating, newRating: eloChanges.red.newRating, change: eloChanges.red.change },
+                        black: { oldRating: eloChanges.black.oldRating, newRating: eloChanges.black.newRating, change: eloChanges.black.change }
+                    }
+                };
+
+                // 7. Save to centralized history
+                log('💾 Saving to centralized game history...', 'info');
+                const centralRef = doc(db, 'artifacts', appId, 'public', 'data', 'all-game-history', gameId);
+                await setDoc(centralRef, gameRecord);
+                log('✅ Centralized history saved', 'success');
+
+                // 8. Save to per-player history
+                log('💾 Saving to player histories...', 'info');
+                await setDoc(doc(db, 'artifacts', appId, 'users', redUid, 'game-history', gameId), gameRecord);
+                log('✅ Red player history saved', 'success');
+                await setDoc(doc(db, 'artifacts', appId, 'users', blackUid, 'game-history', gameId), gameRecord);
+                log('✅ Black player history saved', 'success');
+
+                // 9. Update profiles
+                log('💾 Updating player profiles...', 'info');
+                await setDoc(redProfileRef, {
+                    elo: eloChanges.red.newRating,
+                    gamesPlayed: redGames + 1,
+                    lastGameAt: gameEndTime
+                }, { merge: true });
+                log(`✅ Red profile: ELO ${redELO}→${eloChanges.red.newRating}`, 'success');
+
+                await setDoc(blackProfileRef, {
+                    elo: eloChanges.black.newRating,
+                    gamesPlayed: blackGames + 1,
+                    lastGameAt: gameEndTime
+                }, { merge: true });
+                log(`✅ Black profile: ELO ${blackELO}→${eloChanges.black.newRating}`, 'success');
+
+                // 10. Update leaderboard
+                log('💾 Updating leaderboard...', 'info');
+                const lbRef = doc(db, 'artifacts', appId, 'leaderboard', 'rankings');
+                const lbSnap = await getDoc(lbRef);
+                if (lbSnap.exists()) {
+                    let players = lbSnap.data().players || [];
+
+                    const rIdx = players.findIndex(p => p.uid === redUid);
+                    if (rIdx >= 0) {
+                        players[rIdx].elo = eloChanges.red.newRating;
+                        players[rIdx].gamesPlayed = redGames + 1;
+                        if (winner === 'red') players[rIdx].wins = (players[rIdx].wins || 0) + 1;
+                        else if (winner === 'draw') players[rIdx].draws = (players[rIdx].draws || 0) + 1;
+                        else players[rIdx].losses = (players[rIdx].losses || 0) + 1;
+                        players[rIdx].lastGameAt = gameEndTime;
+                    } else {
+                        log('⚠️ Red player not found in leaderboard', 'warning');
+                    }
+
+                    const bIdx = players.findIndex(p => p.uid === blackUid);
+                    if (bIdx >= 0) {
+                        players[bIdx].elo = eloChanges.black.newRating;
+                        players[bIdx].gamesPlayed = blackGames + 1;
+                        if (winner === 'black') players[bIdx].wins = (players[bIdx].wins || 0) + 1;
+                        else if (winner === 'draw') players[bIdx].draws = (players[bIdx].draws || 0) + 1;
+                        else players[bIdx].losses = (players[bIdx].losses || 0) + 1;
+                        players[bIdx].lastGameAt = gameEndTime;
+                    } else {
+                        log('⚠️ Black player not found in leaderboard', 'warning');
+                    }
+
+                    players.sort((a, b) => b.elo - a.elo);
+                    await setDoc(lbRef, { players, updatedAt: Date.now(), totalPlayers: players.length });
+                    log('✅ Leaderboard updated', 'success');
+                } else {
+                    log('⚠️ Leaderboard document not found - skipping', 'warning');
+                }
+
+                log(`🎉 DONE! Game recovered with ${totalMoves} moves. Winner: ${winner} (${reason})`, 'success');
+                log(`Red (${redName}): ${redELO} → ${eloChanges.red.newRating}`, 'success');
+                log(`Black (${blackName}): ${blackELO} → ${eloChanges.black.newRating}`, 'success');
+
+            } catch (error) {
+                log(`❌ FATAL ERROR: ${error.message}`, 'error');
+                log(`Stack: ${error.stack}`, 'error');
+                console.error(error);
+            }
+        };
+    </script>
+</body>
+</html>

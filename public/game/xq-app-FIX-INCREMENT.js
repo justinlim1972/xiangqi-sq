@@ -5,6 +5,19 @@ import { getDatabase, ref, onValue, onDisconnect, set, remove } from "https://ww
 import { XQEngine } from "./xq-engine.js?v=206";
 import { XQUI } from "./xq-ui.js?v=107";
 
+// Voice Chat character profiles — tuned for Microsoft TTS voices
+// pitch range: 0 (deepest) to 2 (highest), 1 = normal
+// rate range: 0.1 (slowest) to 10 (fastest), 1 = normal
+const VOICE_PROFILES = {
+    'young-lady':  { label: 'Young Lady',  emoji: '👩', pitch: 1.1,  rate: 0.95, gender: 'female' },
+    'old-man':     { label: 'Old Man',     emoji: '👴', pitch: 0.3,  rate: 0.65, gender: 'male'   },
+    'old-auntie':  { label: 'Old Auntie',  emoji: '👵', pitch: 0.6,  rate: 0.7,  gender: 'female' },
+    'young-man':   { label: 'Young Man',   emoji: '👨', pitch: 0.8,  rate: 1.0,  gender: 'male'   },
+    'boy':         { label: 'Small Boy',   emoji: '👦', pitch: 1.4,  rate: 1.15, gender: 'male'   },
+    'girl':        { label: 'Small Girl',  emoji: '👧', pitch: 1.8,  rate: 1.15, gender: 'female' },
+    'baby':        { label: 'Baby',        emoji: '👶', pitch: 2.0,  rate: 0.6,  gender: 'female' },
+};
+
 /**
  * XQApp - Complete Fixed Orchestrator
  * FIXES:
@@ -56,8 +69,8 @@ export class XQApp {
 
         // Sound system - using simple tone generation for now (can replace with real sounds later)
         this.sounds = {
-            pickup: this.createToneSound(800, 0.05, 0.1),    // High short beep for pickup
-            place: this.createToneSound(400, 0.05, 0.15),     // Lower beep for placement
+            pickup: this.createToneSound(800, 0.08, 0.3),    // High short beep for pickup (200% louder)
+            place: this.createToneSound(400, 0.1, 0.45),      // Lower beep for placement (200% louder)
             capture: null,  // Will use TTS for "吃"
             check: null,    // Will use TTS for "将军"
             victory: null   // Will use TTS for victory announcement
@@ -91,20 +104,39 @@ export class XQApp {
         const soundSetting = localStorage.getItem('xq-setting-sound');
         const animationSetting = localStorage.getItem('xq-setting-animation');
         const autosaveSetting = localStorage.getItem('xq-setting-autosave');
+        const voiceChatSetting = localStorage.getItem('xq-setting-voiceChat');
+        const voiceTypeSetting = localStorage.getItem('xq-setting-voiceType');
 
         this.settings = {
             sound: soundSetting !== 'false', // default ON if null, OFF if 'false'
             animation: animationSetting !== 'false', // default ON if null, OFF if 'false'
             autosave: autosaveSetting !== 'false', // default ON if null, OFF if 'false'
-            music: musicSetting !== 'false' // default ON if null, OFF if 'false'
+            music: musicSetting !== 'false', // default ON if null, OFF if 'false'
+            voiceChat: voiceChatSetting === 'true', // default OFF - opt-in feature
+            voiceType: (voiceTypeSetting && VOICE_PROFILES[voiceTypeSetting]) ? voiceTypeSetting : 'young-lady'
         };
+
+        // Voice chat TTS: only speak messages newer than page load time
+        this._voiceChatReadyTime = Date.now();
+        this._spokenChatIds = new Set();
+
+        // Pre-load TTS voices (Chrome loads them async)
+        if (window.speechSynthesis) {
+            window.speechSynthesis.getVoices();
+            window.speechSynthesis.onvoiceschanged = () => {
+                const voices = window.speechSynthesis.getVoices();
+                console.log(`🔊 TTS voices loaded: ${voices.length} voices available`);
+            };
+        }
 
         // Debug log to track settings state
         console.log('⚙️ Settings loaded from localStorage:', {
             sound: this.settings.sound + ' (localStorage: "' + soundSetting + '")',
             animation: this.settings.animation + ' (localStorage: "' + animationSetting + '")',
             autosave: this.settings.autosave + ' (localStorage: "' + autosaveSetting + '")',
-            music: this.settings.music + ' (localStorage: "' + musicSetting + '")'
+            music: this.settings.music + ' (localStorage: "' + musicSetting + '")',
+            voiceChat: this.settings.voiceChat + ' (localStorage: "' + voiceChatSetting + '")',
+            voiceType: this.settings.voiceType + ' (localStorage: "' + voiceTypeSetting + '")'
         });
 
         // Ambient music system
@@ -129,6 +161,21 @@ export class XQApp {
 
         // Battle rejection notification timer
         this.battleRejectionCountdownTimer = null;
+
+        // Idle seat auto-kick system
+        this.IDLE_SEAT_TIMEOUT = 180;       // 3 minutes before kick
+        this.IDLE_WARNING_TIME = 150;       // Warning at 2:30 (30s countdown)
+        this.POST_GAME_TIMEOUT = 30;        // 30 seconds post-game to rematch
+        this.POST_GAME_WARNING_TIME = 15;   // Warning at 15s post-game
+        this.IDLE_CHECK_INTERVAL = 5000;    // Check every 5 seconds
+        this._idleCheckInterval = null;
+        this._idleWarningCountdownTimer = null;
+        this._idleWarningShown = false;     // Prevent duplicate warning modals
+
+        // Room inactivity auto-cleanup (1 hour)
+        this.ROOM_INACTIVITY_TIMEOUT = 60 * 60 * 1000;  // 1 hour in ms
+        this.ROOM_INACTIVITY_CHECK_INTERVAL = 60000;     // Check every 60 seconds
+        this._roomInactivityInterval = null;
 
         // Timer sync optimization - LOCAL ONLY (no Firebase sync)
         this.timerTickCount = 0; // Track seconds elapsed for optimized syncing
@@ -214,6 +261,58 @@ export class XQApp {
                 if (!this.hasJoined) {
                     const tRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'regions', this.rid, 'tables', this.tid);
 
+                    // Check for stale room and clean before joining
+                    try {
+                        const freshSnap = await getDoc(tRef);
+                        if (freshSnap.exists()) {
+                            const td = freshSnap.data();
+                            const hasPlayers = td.playerRed || td.playerBlack;
+                            const lastActivity = td.lastActivityAt || 0;
+                            const elapsed = Date.now() - lastActivity;
+                            const hasGhostOccupants = (td.occupants || []).length > 0;
+
+                            if (!hasPlayers && elapsed > this.ROOM_INACTIVITY_TIMEOUT && (hasGhostOccupants || td.matchActive)) {
+                                // Safety check: verify game data is also stale before wiping
+                                const gRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'games', this.tid);
+                                const gSnap = await getDoc(gRef);
+                                const gData = gSnap.exists() ? gSnap.data() : {};
+                                const gameIsActive = gData.status === 'playing';
+                                const gameJustFinished = gData.finishedAt && (Date.now() - gData.finishedAt < 300000); // 5 min grace
+                                const hasGameHistory = (gData.history || []).length > 0;
+
+                                if (gameIsActive || gameJustFinished || hasGameHistory) {
+                                    // Game data still present — don't wipe, just update lastActivityAt
+                                    console.log('⚠️ Skipping stale cleanup - game data still present');
+                                    await setDoc(tRef, { lastActivityAt: Date.now() }, { merge: true });
+                                } else {
+                                    console.log(`🧹 Stale room detected on entry (idle ${Math.round(elapsed / 60000)} min). Cleaning...`);
+                                    await setDoc(tRef, {
+                                        occupants: [],
+                                        queue: [],
+                                        matchActive: false,
+                                        battleRequest: deleteField(),
+                                        lastActivityAt: Date.now(),
+                                        postGameIdle: false
+                                    }, { merge: true });
+                                    await setDoc(gRef, {
+                                        chat: [],
+                                        board: null,
+                                        status: 'waiting',
+                                        history: [],
+                                        moveHistory: [],
+                                        turn: 'red'
+                                    }, { merge: true });
+                                    // Clear RTDB presence
+                                    const tablePresenceRef = ref(this.rtdb, `presence/${this.rid}/${this.tid}`);
+                                    await remove(tablePresenceRef);
+                                    console.log('✅ Stale room cleaned on entry');
+                                }
+                            }
+                        }
+                    } catch (staleErr) {
+                        console.warn('⚠️ Stale room check failed (proceeding with join):', staleErr);
+                    }
+
                     const playerData = {
                         uid: this.user.uid,
                         name: this.profile?.playerName || this.user.email.split('@')[0],
@@ -268,6 +367,9 @@ export class XQApp {
 
                     // Set up presence tracking in Realtime Database
                     await this.setupPresenceTracking();
+
+                    // Reset room activity (observer/player joined)
+                    this.resetRoomActivity();
                 }
 
                 this.syncTable();
@@ -412,6 +514,9 @@ export class XQApp {
         const hasMoves = g.history && g.history.length > 0;
         if (!hasMoves) return;
 
+        // Don't check timeout if timer hasn't been initialized yet
+        if (!g.timerStarted || !g.redTimeLeft || !g.blackTimeLeft) return;
+
         if (redDisplay <= 0 && g.turn === 'red') {
             this.handleTimeout('red');
         } else if (blackDisplay <= 0 && g.turn === 'black') {
@@ -464,6 +569,10 @@ export class XQApp {
     }
 
     async handleTimeout(color) {
+        // Prevent duplicate timeout calls (both players may detect timeout simultaneously)
+        if (this._timeoutHandled) return;
+        this._timeoutHandled = true;
+
         // Safety: Never declare timeout on a fresh game with no moves
         if (!this.gameState?.history || this.gameState.history.length === 0) {
             console.log('⏭️ Skipping timeout - no moves made yet in this game');
@@ -476,10 +585,15 @@ export class XQApp {
         // Show timeout animation and sound
         this.showMoveAnimation('timeout', { winner: winner, loser: color });
 
-        // Clear matchActive flag in table
+        // Clear matchActive flag in table and start post-game idle timer
         const tRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'regions', this.rid, 'tables', this.tid);
         await setDoc(tRef, {
-            matchActive: deleteField()
+            matchActive: deleteField(),
+            postGameIdle: true,
+            playerRedSeatedAt: Date.now(),
+            playerBlackSeatedAt: Date.now(),
+            playerRedWarned: false,
+            playerBlackWarned: false
         }, { merge: true });
 
         // Update game status
@@ -507,6 +621,15 @@ export class XQApp {
             if(!snap.exists()) return;
             this.table = snap.data();
 
+            // Cache player data whenever both seats are occupied (for saving after a player leaves)
+            // Always update cache when both seats are filled - handles page refresh, new game, etc.
+            if (this.table?.playerRed?.uid && this.table?.playerBlack?.uid) {
+                this._cachedPlayers = {
+                    red: { ...this.table.playerRed },
+                    black: { ...this.table.playerBlack }
+                };
+            }
+
             // Populate occupants list from table data
             this.occupants = this.table.occupants || [];
 
@@ -522,6 +645,9 @@ export class XQApp {
 
             // Handle ambient music based on occupant count
             this.handleMusicOnOccupantsChange();
+
+            // Start room inactivity monitor (only starts once)
+            this.startRoomInactivityCheck();
 
             // Update player displays
             document.getElementById('name-red').innerText = this.table.playerRed?.name || 'Empty Slot';
@@ -666,8 +792,373 @@ export class XQApp {
             console.log('📞 Calling updateInGameControls from syncTable()');
             this.updateInGameControls();
 
+            // Update queue display whenever table data changes
+            this.updateQueueDisplay();
+
+            // Idle seat monitoring
+            this.manageIdleMonitoring();
+            this.updateIdleBadges();
+
             this.hideLoader();
         });
+    }
+
+    // ═══════════════════════════════════════════
+    // IDLE SEAT AUTO-KICK SYSTEM
+    // ═══════════════════════════════════════════
+
+    manageIdleMonitoring() {
+        const shouldMonitor = this.table &&
+            (this.table.playerRed || this.table.playerBlack) &&
+            !this.table.matchActive;
+
+        if (shouldMonitor && !this._idleCheckInterval) {
+            this._idleCheckInterval = setInterval(() => {
+                this.checkIdleSeats();
+            }, this.IDLE_CHECK_INTERVAL);
+            console.log('⏰ Started idle seat monitoring');
+        } else if (!shouldMonitor && this._idleCheckInterval) {
+            clearInterval(this._idleCheckInterval);
+            this._idleCheckInterval = null;
+            this._idleWarningShown = false;
+            // Hide warning modal if game started
+            const modal = document.getElementById('idle-warning-modal');
+            if (modal) modal.style.display = 'none';
+            if (this._idleWarningCountdownTimer) {
+                clearInterval(this._idleWarningCountdownTimer);
+                this._idleWarningCountdownTimer = null;
+            }
+            console.log('⏰ Stopped idle seat monitoring');
+        }
+    }
+
+    checkIdleSeats() {
+        if (!this.user || !this.table) return;
+        if (this.table.matchActive) return;
+        if (this.table.battleRequest) return; // Active battle request = not idle
+
+        const now = Date.now();
+        const isPostGame = this.table.postGameIdle === true;
+        const timeout = isPostGame ? this.POST_GAME_TIMEOUT : this.IDLE_SEAT_TIMEOUT;
+        const warningTime = isPostGame ? this.POST_GAME_WARNING_TIME : this.IDLE_WARNING_TIME;
+
+        // Check RED seat
+        if (this.table.playerRed && this.table.playerRedSeatedAt) {
+            const idleSeconds = (now - this.table.playerRedSeatedAt) / 1000;
+            if (idleSeconds >= timeout) {
+                this.kickIdlePlayer('red');
+            } else if (idleSeconds >= warningTime && !this.table.playerRedWarned) {
+                this.showIdleWarning('red', timeout - idleSeconds);
+            }
+        }
+
+        // Check BLACK seat
+        if (this.table.playerBlack && this.table.playerBlackSeatedAt) {
+            const idleSeconds = (now - this.table.playerBlackSeatedAt) / 1000;
+            if (idleSeconds >= timeout) {
+                this.kickIdlePlayer('black');
+            } else if (idleSeconds >= warningTime && !this.table.playerBlackWarned) {
+                this.showIdleWarning('black', timeout - idleSeconds);
+            }
+        }
+    }
+
+    async showIdleWarning(side, timeRemaining) {
+        const playerData = side === 'red' ? this.table.playerRed : this.table.playerBlack;
+        if (!playerData) return;
+
+        const iAmIdle = playerData.uid === this.user.uid;
+
+        // Set warned flag in Firestore (so observers see the badge)
+        const tRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'regions', this.rid, 'tables', this.tid);
+        const warnedKey = side === 'red' ? 'playerRedWarned' : 'playerBlackWarned';
+
+        try {
+            await setDoc(tRef, { [warnedKey]: true }, { merge: true });
+        } catch (e) {
+            console.error('⚠️ Failed to set warned flag:', e);
+        }
+
+        // Post warning to chat (visible to everyone)
+        const playerName = playerData.name || 'Player';
+        const gameRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'games', this.tid);
+        try {
+            await setDoc(gameRef, {
+                chat: arrayUnion({
+                    user: 'SYSTEM',
+                    text: `⚠️ ${playerName} will be kicked for idling in ${Math.ceil(timeRemaining)} seconds!`,
+                    ts: Date.now()
+                })
+            }, { merge: true });
+        } catch (e) {
+            console.error('⚠️ Failed to post idle warning chat:', e);
+        }
+
+        // Show modal only to the idle player
+        if (iAmIdle && !this._idleWarningShown) {
+            this._idleWarningShown = true;
+            const modal = document.getElementById('idle-warning-modal');
+            if (modal) {
+                modal.style.display = 'flex';
+                this.startIdleWarningCountdown(Math.ceil(timeRemaining));
+            }
+        }
+    }
+
+    startIdleWarningCountdown(initialTime) {
+        if (this._idleWarningCountdownTimer) {
+            clearInterval(this._idleWarningCountdownTimer);
+        }
+
+        let timeLeft = initialTime;
+        const countdownEl = document.getElementById('idle-countdown');
+        if (countdownEl) countdownEl.innerText = timeLeft;
+
+        this._idleWarningCountdownTimer = setInterval(() => {
+            timeLeft--;
+            if (countdownEl) countdownEl.innerText = Math.max(0, timeLeft);
+            if (timeLeft <= 0) {
+                clearInterval(this._idleWarningCountdownTimer);
+                this._idleWarningCountdownTimer = null;
+            }
+        }, 1000);
+    }
+
+    async dismissIdleWarning() {
+        // Hide modal
+        const modal = document.getElementById('idle-warning-modal');
+        if (modal) modal.style.display = 'none';
+        this._idleWarningShown = false;
+
+        if (this._idleWarningCountdownTimer) {
+            clearInterval(this._idleWarningCountdownTimer);
+            this._idleWarningCountdownTimer = null;
+        }
+
+        // Reset idle timer in Firestore
+        const iAmRed = this.table?.playerRed?.uid === this.user.uid;
+        const iAmBlack = this.table?.playerBlack?.uid === this.user.uid;
+        if (!iAmRed && !iAmBlack) return;
+
+        const tRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'regions', this.rid, 'tables', this.tid);
+        const updates = {};
+
+        if (iAmRed) {
+            updates.playerRedSeatedAt = Date.now();
+            updates.playerRedWarned = false;
+        }
+        if (iAmBlack) {
+            updates.playerBlackSeatedAt = Date.now();
+            updates.playerBlackWarned = false;
+        }
+
+        try {
+            await setDoc(tRef, updates, { merge: true });
+            console.log('⏰ Idle timer reset - user acknowledged presence');
+            this.showStatus("Idle timer reset", "gold");
+        } catch (e) {
+            console.error('❌ Failed to reset idle timer:', e);
+        }
+    }
+
+    async kickIdlePlayer(side) {
+        const playerData = side === 'red' ? this.table.playerRed : this.table.playerBlack;
+        if (!playerData) return;
+
+        // Only the idle player's own client OR the table owner should execute the kick
+        const iAmIdlePlayer = playerData.uid === this.user.uid;
+        const iAmOwner = this.table.tableOwner?.uid === this.user.uid;
+        if (!iAmIdlePlayer && !iAmOwner) return;
+
+        console.log(`⏰ Kicking idle player from ${side} seat: ${playerData.name}`);
+
+        const tRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'regions', this.rid, 'tables', this.tid);
+
+        try {
+            // Fresh read to prevent race conditions
+            const freshSnap = await getDoc(tRef);
+            const t = freshSnap.data();
+
+            if (t.matchActive) return;
+            if (t.battleRequest) return;
+
+            const seatKey = side === 'red' ? 'playerRed' : 'playerBlack';
+            const freshPlayer = t[seatKey];
+            if (!freshPlayer) return;
+
+            // Double-check timeout
+            const seatedAtKey = side === 'red' ? 'playerRedSeatedAt' : 'playerBlackSeatedAt';
+            const seatedAt = t[seatedAtKey];
+            if (!seatedAt) return;
+
+            const isPostGame = t.postGameIdle === true;
+            const timeout = isPostGame ? this.POST_GAME_TIMEOUT : this.IDLE_SEAT_TIMEOUT;
+            const idleSeconds = (Date.now() - seatedAt) / 1000;
+            if (idleSeconds < timeout) return;
+
+            const playerName = freshPlayer.name || 'Player';
+
+            const updates = {
+                [seatKey]: deleteField(),
+                [seatedAtKey]: deleteField(),
+                [side === 'red' ? 'playerRedWarned' : 'playerBlackWarned']: deleteField()
+            };
+
+            if (t.battleRequest) {
+                updates.battleRequest = deleteField();
+            }
+
+            // Handle ownership transfer
+            const opponentStillSeated = side === 'red' ? t.playerBlack : t.playerRed;
+            const kickedPlayerIsOwner = t.tableOwner?.uid === freshPlayer.uid;
+
+            if (kickedPlayerIsOwner) {
+                if (opponentStillSeated) {
+                    updates.tableOwner = {
+                        uid: opponentStillSeated.uid,
+                        name: opponentStillSeated.name,
+                        since: Date.now()
+                    };
+                } else {
+                    updates.tableOwner = deleteField();
+                }
+            }
+
+            await setDoc(tRef, updates, { merge: true });
+            console.log(`✅ Kicked ${playerName} for being idle`);
+
+            // Post system chat message
+            const gameRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'games', this.tid);
+            await setDoc(gameRef, {
+                chat: arrayUnion({
+                    user: 'SYSTEM',
+                    text: `⏰ ${playerName} was removed for inactivity`,
+                    ts: Date.now()
+                })
+            }, { merge: true });
+
+            // Show notification
+            if (iAmIdlePlayer) {
+                this.showStatus("You were removed for inactivity", "red");
+                const modal = document.getElementById('idle-warning-modal');
+                if (modal) modal.style.display = 'none';
+                this._idleWarningShown = false;
+            } else {
+                this.showStatus(`${playerName} was removed for inactivity`, "gold");
+            }
+
+        } catch (error) {
+            console.error('❌ Kick idle player error:', error);
+        }
+    }
+
+    updateIdleBadges() {
+        const redBadge = document.getElementById('idle-badge-red');
+        const blackBadge = document.getElementById('idle-badge-black');
+
+        if (redBadge) {
+            redBadge.style.display = this.table?.playerRedWarned ? 'inline' : 'none';
+        }
+        if (blackBadge) {
+            blackBadge.style.display = this.table?.playerBlackWarned ? 'inline' : 'none';
+        }
+    }
+
+    // ========== ROOM INACTIVITY AUTO-CLEANUP (1 HOUR) ==========
+
+    /**
+     * Reset the room activity timestamp. Called whenever meaningful activity occurs.
+     */
+    async resetRoomActivity() {
+        if (!this.tid || !this.rid) return;
+        try {
+            const tRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'regions', this.rid, 'tables', this.tid);
+            await setDoc(tRef, { lastActivityAt: Date.now() }, { merge: true });
+        } catch (e) {
+            console.warn('⚠️ Failed to reset room activity timestamp:', e);
+        }
+    }
+
+    /**
+     * Start the room inactivity check interval. Only starts once.
+     */
+    startRoomInactivityCheck() {
+        if (this._roomInactivityInterval) return; // Already running
+        console.log('🕐 Starting room inactivity monitor (1 hour timeout)');
+
+        // Main check every 60 seconds
+        this._roomInactivityInterval = setInterval(() => {
+            this.checkRoomInactivity();
+        }, this.ROOM_INACTIVITY_CHECK_INTERVAL);
+
+        // Also check immediately when user returns to tab (browser throttles timers in background)
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') {
+                console.log('👁️ Tab became visible - running inactivity check');
+                this.checkRoomInactivity();
+            }
+        });
+    }
+
+    /**
+     * Check if the room has been inactive for 1 hour and perform cleanup.
+     */
+    async checkRoomInactivity() {
+        if (!this.table || !this.user) return;
+
+        // Skip if either seat is occupied (players are present)
+        if (this.table.playerRed || this.table.playerBlack) return;
+
+        // Safeguard: if matchActive is true but both seats are empty, it's stale — force clear it
+        if (this.table.matchActive) {
+            console.log('⚠️ matchActive is true but both seats empty — clearing stale matchActive');
+            const tRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'regions', this.rid, 'tables', this.tid);
+            await setDoc(tRef, { matchActive: false }, { merge: true });
+            return; // Will trigger cleanup on next check
+        }
+
+        const lastActivity = this.table.lastActivityAt || 0;
+        const elapsed = Date.now() - lastActivity;
+
+        if (elapsed < this.ROOM_INACTIVITY_TIMEOUT) return;
+
+        console.log(`🧹 Room inactive for ${Math.round(elapsed / 60000)} minutes. Performing cleanup...`);
+
+        try {
+            const tRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'regions', this.rid, 'tables', this.tid);
+            const gRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'games', this.tid);
+
+            // 1. Clear all occupants from table
+            await setDoc(tRef, {
+                occupants: [],
+                queue: [],
+                battleRequest: deleteField(),
+                matchActive: false,
+                lastActivityAt: Date.now()
+            }, { merge: true });
+
+            // 2. Clear chat and reset game state
+            await setDoc(gRef, {
+                chat: [],
+                board: null,
+                status: 'waiting',
+                history: [],
+                moveHistory: [],
+                turn: 'red'
+            }, { merge: true });
+
+            // 3. Clear all presence entries from RTDB
+            const tablePresenceRef = ref(this.rtdb, `presence/${this.rid}/${this.tid}`);
+            await remove(tablePresenceRef);
+
+            console.log('✅ Room cleanup complete - observers kicked, chat cleared');
+
+            // Redirect this client back to lobby since they were kicked
+            window.location.href = '../lobby/lobby.html';
+
+        } catch (error) {
+            console.error('❌ Room inactivity cleanup failed:', error);
+        }
     }
 
     updateInGameControls() {
@@ -810,6 +1301,16 @@ export class XQApp {
             const g = snap.data() || {};
             this.gameState = g;
 
+            // Cache player data from game document if available (set by engageBattle)
+            // This ensures _cachedPlayers survives page refresh and seat changes
+            if (g.playerRed?.uid && g.playerBlack?.uid && !this._cachedPlayers) {
+                this._cachedPlayers = {
+                    red: { ...g.playerRed },
+                    black: { ...g.playerBlack }
+                };
+                console.log('📋 Cached player data from game document');
+            }
+
             console.log('🎮 Game state updated:', {
                 status: g.status,
                 hasBoard: !!g.board,
@@ -843,6 +1344,9 @@ export class XQApp {
                     overlayEl.style.visibility = 'hidden';
                 }
                 this.hidePerpetualCheckWarning();
+                this._timeoutHandled = false; // Reset timeout guard for new game
+                this._queueProcessed = false; // Reset queue processing guard
+                this[`${this.tid}_histor_saved`] = false; // Reset auto-save guard for new game
             }
             this.currentGameGeneration = gameGeneration;
 
@@ -868,6 +1372,16 @@ export class XQApp {
                     overlayEl.style.visibility = 'hidden';
                 }
                 this.hidePerpetualCheckWarning();
+                this._timeoutHandled = false; // Reset timeout guard for new game
+                this._queueProcessed = false; // Reset queue processing guard for new game
+                this[`${this.tid}_histor_saved`] = false; // Reset auto-save guard for new game
+
+                // Cache player data at game start so we can save even if a player leaves
+                this._cachedPlayers = {
+                    red: this.table?.playerRed ? { ...this.table.playerRed } : null,
+                    black: this.table?.playerBlack ? { ...this.table.playerBlack } : null
+                };
+                console.log('📋 Cached player data for save:', this._cachedPlayers);
                 console.log('🔄 Local announcement state reset for new game');
 
                 const iAmRed = this.table?.playerRed?.uid === this.user?.uid;
@@ -919,10 +1433,13 @@ export class XQApp {
             const log = document.getElementById('chat-log');
             if(log && g.chat) {
                 log.innerHTML = g.chat.slice(-50).map(m =>
-                    `<div class="chat-msg"><strong>${m.user}:</strong> ${m.text}</div>`
+                    `<div class="chat-msg"><strong>${m.user}:</strong> ${this.renderChatText(m.text, m.voiceType)}</div>`
                 ).join('');
                 log.scrollTop = log.scrollHeight;
             }
+
+            // Voice Chat TTS - speak any new bracketed messages
+            if (g.chat) this.speakVoiceChat(g.chat);
 
             // Update chat history modal (mobile)
             const historyLog = document.getElementById('chat-history-log');
@@ -930,7 +1447,7 @@ export class XQApp {
                 historyLog.innerHTML = g.chat.slice(-50).map(m =>
                     `<div class="chat-msg">
                         <div class="chat-msg-author">${m.user}</div>
-                        <div class="chat-msg-text">${m.text}</div>
+                        <div class="chat-msg-text">${this.renderChatText(m.text)}</div>
                     </div>`
                 ).join('');
                 historyLog.scrollTop = historyLog.scrollHeight;
@@ -1103,6 +1620,40 @@ export class XQApp {
                 } else {
                     console.log('⏭️ Skipping resignation animation - already shown for this game ending');
                 }
+            }
+
+            // ========== BACKUP SAVE: If game ended but historySaved is not set, try saving ==========
+            // This catches the case where the primary saver (resign/checkmate/timeout) failed or disconnected.
+            // ALL clients (players + observers) will attempt this, but the Firestore historySaved flag
+            // and the centralized duplicate check prevent double-saves.
+            if (g.status && g.status !== 'playing' && g.status !== 'waiting' &&
+                g.winner && (g.history || []).length > 0 && !g.historySaved) {
+                // Clear any existing backup timer
+                clearTimeout(this._backupSaveTimer);
+                // Wait 5 seconds to give the primary saver time to finish
+                this._backupSaveTimer = setTimeout(async () => {
+                    try {
+                        // Re-read game document to check if primary saver succeeded
+                        const backupGameRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'games', this.tid);
+                        const backupSnap = await getDoc(backupGameRef);
+                        const backupData = backupSnap.exists() ? backupSnap.data() : {};
+
+                        if (!backupData.historySaved && (backupData.history || []).length > 0) {
+                            console.log('🔄 BACKUP SAVE: Primary saver did not save within 5s, attempting backup save...');
+                            console.log('🔄 Winner:', backupData.winner, 'Reason:', backupData.reason || backupData.status);
+                            await this.saveGameToHistory(backupData.winner, backupData.reason || backupData.status);
+                        } else if (backupData.historySaved) {
+                            console.log('✅ BACKUP SAVE: Not needed - primary saver already completed');
+                        }
+                    } catch (backupErr) {
+                        console.error('❌ BACKUP SAVE failed:', backupErr);
+                    }
+                }, 5000);
+            }
+            // If historySaved just became true, cancel any pending backup timer
+            if (g.historySaved && this._backupSaveTimer) {
+                clearTimeout(this._backupSaveTimer);
+                this._backupSaveTimer = null;
             }
 
             // Render pieces if game is active
@@ -1410,8 +1961,16 @@ export class XQApp {
 
         try {
             const updates = {};
-            if (isRed) updates.playerRed = deleteField();
-            if (isBlack) updates.playerBlack = deleteField();
+            if (isRed) {
+                updates.playerRed = deleteField();
+                updates.playerRedSeatedAt = deleteField();
+                updates.playerRedWarned = deleteField();
+            }
+            if (isBlack) {
+                updates.playerBlack = deleteField();
+                updates.playerBlackSeatedAt = deleteField();
+                updates.playerBlackWarned = deleteField();
+            }
 
             // Check if opponent is still seated
             const opponentStillSeated = isRed ? t?.playerBlack : t?.playerRed;
@@ -1705,21 +2264,37 @@ export class XQApp {
                 console.log('👑 Setting as table owner (first to sit)');
             }
 
+            // Record seat timestamp for idle detection
+            const seatedAtKey = side === 'red' ? 'playerRedSeatedAt' : 'playerBlackSeatedAt';
+            const warnedKey = side === 'red' ? 'playerRedWarned' : 'playerBlackWarned';
+            updates[seatedAtKey] = Date.now();
+            updates[warnedKey] = false;
+            updates.postGameIdle = false; // Fresh sit = full 3-min timeout
+
+            // Also remove from queue if sitting down while in queue
+            const currentQueue = currentTable.queue || [];
+            const queueIdx = currentQueue.findIndex(q => q.uid === this.user.uid);
+            if (queueIdx >= 0) {
+                updates.queue = currentQueue.filter(q => q.uid !== this.user.uid);
+                console.log('🎫 Removing myself from queue (now seated)');
+            }
+
             await setDoc(tRef, updates, { merge: true });
-            
+
             console.log('✅ Successfully saved to Firestore!');
             this.showStatus(`You are now seated as ${side.toUpperCase()}`, "gold");
-            
+            this.resetRoomActivity(); // Seat taken resets room inactivity timer
+
         } catch (error) {
             console.error('❌ Error saving to Firestore:', error);
-            
+
             // Check if it's a permission error (likely trying to sit in both seats)
             if (error.code === 'permission-denied' || error.message.includes('permissions')) {
                 this.showStatus("Cannot sit in both seats!", "red");
             } else {
                 this.showStatus("Failed to sit down: " + error.message, "red");
             }
-            
+
             if (seatingArea) seatingArea.style.pointerEvents = 'auto';
         } finally {
             // ALWAYS RELEASE LOCK
@@ -1742,10 +2317,12 @@ export class XQApp {
                 chat: arrayUnion({
                     user: myName,
                     text: el.value.trim(),
-                    ts: Date.now()
+                    ts: Date.now(),
+                    voiceType: this.settings.voiceType || 'young-lady'
                 })
             }, { merge: true });
             el.value = "";
+            this.resetRoomActivity(); // Chat activity resets room inactivity timer
         } catch (e) {
             console.error("Chat Error:", e);
             this.showStatus("Chat Failed", "red");
@@ -1767,10 +2344,12 @@ export class XQApp {
                 chat: arrayUnion({
                     user: myName,
                     text: el.value.trim(),
-                    ts: Date.now()
+                    ts: Date.now(),
+                    voiceType: this.settings.voiceType || 'young-lady'
                 })
             }, { merge: true });
             el.value = "";
+            this.resetRoomActivity(); // Chat activity resets room inactivity timer
         } catch (e) {
             console.error("Chat Error:", e);
             this.showStatus("Chat Failed", "red");
@@ -1815,7 +2394,7 @@ export class XQApp {
         // Update bubble content
         bubble.innerHTML = `
             <div class="chat-bubble-author">${latestMsg.user}</div>
-            <div class="chat-bubble-message">${latestMsg.text}</div>
+            <div class="chat-bubble-message">${this.renderChatText(latestMsg.text, latestMsg.voiceType)}</div>
         `;
 
         // Show bubble
@@ -1874,7 +2453,15 @@ export class XQApp {
             updates.battleRequest = deleteField();
             console.log('🧹 Clearing battle request');
         }
-        
+
+        // Remove from queue if leaving the room
+        const currentQueue = t?.queue || [];
+        const updatedQueue = currentQueue.filter(q => q.uid !== this.user.uid);
+        if (currentQueue.length !== updatedQueue.length) {
+            updates.queue = updatedQueue;
+            console.log('🎫 Removing myself from queue');
+        }
+
         // Check if table will be empty after I leave
         const occupantsWillBeEmpty = (t?.occupants || []).length <= 1;
 
@@ -1890,6 +2477,7 @@ export class XQApp {
                 turn: 'red'
             }, { merge: true });
             updates.matchActive = false;
+            updates.queue = []; // Clear queue when table is empty
         }
         
         await setDoc(tRef, updates, { merge: true });
@@ -2029,7 +2617,13 @@ export class XQApp {
 
         console.log('💾 Saving battleRequest to Firestore:', battleRequestData);
         await setDoc(tRef, {
-            battleRequest: battleRequestData
+            battleRequest: battleRequestData,
+            // Reset idle timers - both players are active
+            playerRedSeatedAt: Date.now(),
+            playerBlackSeatedAt: Date.now(),
+            playerRedWarned: false,
+            playerBlackWarned: false,
+            postGameIdle: false
         }, { merge: true });
         console.log('✅ battleRequest saved successfully');
 
@@ -2199,7 +2793,18 @@ export class XQApp {
                 startedAt: Date.now(), // Track when game started
                 finishedAt: deleteField(), // Clear previous game's finish time
                 winner: deleteField(), // Clear previous winner
-                reason: deleteField() // Clear previous finish reason
+                reason: deleteField(), // Clear previous finish reason
+                // Store player data in game doc so saveGameToHistory can always find it
+                playerRed: this.table?.playerRed ? { ...this.table.playerRed } : null,
+                playerBlack: this.table?.playerBlack ? { ...this.table.playerBlack } : null,
+                // Clear stale timer data from previous game to prevent instant timeout
+                redTimeLeft: deleteField(),
+                blackTimeLeft: deleteField(),
+                turnStartTime: deleteField(),
+                timerStarted: deleteField(),
+                // Clear historySaved flag so the new game can be recorded
+                historySaved: deleteField(),
+                historySavedAt: deleteField()
             }, { merge: true });
 
             // Then add the chat message separately
@@ -2214,10 +2819,17 @@ export class XQApp {
             console.log('✅ Game state saved to Firestore (history cleared for new game)');
 
             await setDoc(doc(this.db, 'artifacts', this.appId, 'public', 'data', 'regions', this.rid, 'tables', this.tid), {
-                matchActive: true
+                matchActive: true,
+                // Clear idle tracking during active game
+                playerRedSeatedAt: deleteField(),
+                playerBlackSeatedAt: deleteField(),
+                playerRedWarned: false,
+                playerBlackWarned: false,
+                postGameIdle: false
             }, { merge: true });
 
             console.log('✅ Match marked as active');
+            this.resetRoomActivity(); // Game started resets room inactivity timer
         } catch (error) {
             console.error('❌ Error starting battle:', error);
             this.showStatus("Failed to start battle: " + error.message, "red");
@@ -2381,6 +2993,7 @@ export class XQApp {
             boardHash: boardHash,
             movedBy: this.gameState.turn, // Who made this move
             isCheck: isCheck,
+            isCapture: isCapture, // Capture resets perpetual check count (standard Xiangqi rule)
             ts: Date.now()
         };
 
@@ -2500,10 +3113,21 @@ export class XQApp {
 
         await setDoc(gameRef, updateData, { merge: true });
 
-        // Save game to history if game ended
+        // Save game to history and clear matchActive if game ended
         if (newStatus !== 'playing') {
             const gameWinner = winner || 'draw';
             await this.saveGameToHistory(gameWinner, newStatus);
+
+            // Clear matchActive from table and start post-game idle timer
+            const tRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'regions', this.rid, 'tables', this.tid);
+            await setDoc(tRef, {
+                matchActive: deleteField(),
+                postGameIdle: true,
+                playerRedSeatedAt: Date.now(),
+                playerBlackSeatedAt: Date.now(),
+                playerRedWarned: false,
+                playerBlackWarned: false
+            }, { merge: true });
         }
 
         // Clear selection and release move lock
@@ -2539,10 +3163,15 @@ export class XQApp {
         const winner = myColor === 'red' ? 'black' : 'red';
         const myName = this.profile?.playerName || this.user.email.split('@')[0];
 
-        // Clear matchActive flag in table
+        // Clear matchActive flag in table and start post-game idle timer
         const tRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'regions', this.rid, 'tables', this.tid);
         await setDoc(tRef, {
-            matchActive: deleteField()
+            matchActive: deleteField(),
+            postGameIdle: true,
+            playerRedSeatedAt: Date.now(),
+            playerBlackSeatedAt: Date.now(),
+            playerRedWarned: false,
+            playerBlackWarned: false
         }, { merge: true });
 
         // Update game status
@@ -3065,9 +3694,10 @@ export class XQApp {
         // Check if sounds are enabled
         if (!this.settings.sound) return;
 
-        // Using a simple approach - you already have TTS in victory_clip.html
-        // For now, let's use the browser's built-in speech synthesis as a fallback
         try {
+            // Cancel any pending game TTS to prevent double announcements
+            window.speechSynthesis.cancel();
+
             const utterance = new SpeechSynthesisUtterance(text);
             utterance.lang = 'zh-CN';
             utterance.rate = 1.0;
@@ -3087,9 +3717,15 @@ export class XQApp {
     async showMoveAnimation(type, data = {}) {
         console.log('🎭 showMoveAnimation called:', type, data);
 
-        // Transfer table ownership to winner (no game-over image)
+        // Transfer table ownership to winner and process queue (no game-over image)
         if ((type === 'checkmate' || type === 'perpetual-check' || type === 'perpetual-chase' || type === 'resignation' || type === 'timeout') && data.winner) {
             this.transferOwnershipToWinner(data.winner);
+
+            // Process queue: unseat loser, seat first queued player (run once)
+            if (!this._queueProcessed) {
+                this._queueProcessed = true;
+                this.processQueueAfterGame(data.winner);
+            }
         }
 
         // Check if animations are enabled for the sidebar animation
@@ -3402,6 +4038,263 @@ export class XQApp {
             this.updateFENDisplay();
             this.updateMoveHistory();
         }
+
+        // Update queue display if switching to QUEUE tab
+        if (tabName === 'queue') {
+            this.updateQueueDisplay();
+        }
+    }
+
+    // ===== QUEUE SYSTEM =====
+
+    /**
+     * Join the game queue as an observer
+     */
+    async joinQueue() {
+        if (!this.user) {
+            this.showStatus('You must be logged in to join the queue', 'red');
+            return;
+        }
+
+        // Check if already seated
+        const isSeated = this.table?.playerRed?.uid === this.user.uid ||
+                         this.table?.playerBlack?.uid === this.user.uid;
+        if (isSeated) {
+            this.showStatus('You are already seated!', 'red');
+            return;
+        }
+
+        // Check if already in queue
+        const queue = this.table?.queue || [];
+        if (queue.some(q => q.uid === this.user.uid)) {
+            this.showStatus('You are already in the queue!', 'red');
+            return;
+        }
+
+        // If a seat is vacant, sit directly instead of queuing
+        const redOpen = !this.table?.playerRed;
+        const blackOpen = !this.table?.playerBlack;
+        if (redOpen || blackOpen) {
+            const side = redOpen ? 'red' : 'black';
+            console.log(`🎫 Seat is open (${side}) — sitting directly instead of queuing`);
+            this.sit(side);
+            return;
+        }
+
+        try {
+            const tRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'regions', this.rid, 'tables', this.tid);
+            const myName = this.profile?.playerName || this.user.displayName || this.user.email?.split('@')[0] || 'Anonymous';
+            const myElo = this.profile?.elo || 1200;
+            const myAvatar = this.profile?.avatarUrl || this.user.photoURL || '/lobby/1.JPG';
+
+            await setDoc(tRef, {
+                queue: arrayUnion({
+                    uid: this.user.uid,
+                    name: myName,
+                    elo: myElo,
+                    avatar: myAvatar,
+                    joinedAt: Date.now()
+                })
+            }, { merge: true });
+
+            console.log('🎫 Joined queue');
+            this.showStatus('🎫 You joined the queue!', 'green');
+        } catch (error) {
+            console.error('❌ Failed to join queue:', error);
+            this.showStatus('Failed to join queue', 'red');
+        }
+    }
+
+    /**
+     * Leave the game queue voluntarily
+     */
+    async leaveQueue() {
+        if (!this.user) return;
+
+        try {
+            const tRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'regions', this.rid, 'tables', this.tid);
+            const freshSnap = await getDoc(tRef);
+            const t = freshSnap.data();
+            const queue = t?.queue || [];
+            const updatedQueue = queue.filter(q => q.uid !== this.user.uid);
+
+            await setDoc(tRef, { queue: updatedQueue }, { merge: true });
+
+            console.log('❌ Left queue');
+            this.showStatus('You left the queue', 'gold');
+        } catch (error) {
+            console.error('❌ Failed to leave queue:', error);
+        }
+    }
+
+    /**
+     * Remove a user from queue by uid (used internally)
+     */
+    async removeFromQueue(uid) {
+        try {
+            const tRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'regions', this.rid, 'tables', this.tid);
+            const freshSnap = await getDoc(tRef);
+            const t = freshSnap.data();
+            const queue = t?.queue || [];
+            const updatedQueue = queue.filter(q => q.uid !== uid);
+
+            await setDoc(tRef, { queue: updatedQueue }, { merge: true });
+        } catch (error) {
+            console.error('❌ Failed to remove from queue:', error);
+        }
+    }
+
+    /**
+     * Process queue after a game ends with a winner.
+     * The loser is unseated and the first person in queue takes their seat.
+     * @param {string} winner - 'red' or 'black'
+     */
+    async processQueueAfterGame(winner) {
+        if (!winner || winner === 'draw') {
+            console.log('🎫 Draw game — no queue processing, both players keep seats');
+            return;
+        }
+
+        const loserSide = winner === 'red' ? 'black' : 'red';
+        const loserKey = loserSide === 'red' ? 'playerRed' : 'playerBlack';
+
+        try {
+            const tRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'regions', this.rid, 'tables', this.tid);
+            const freshSnap = await getDoc(tRef);
+            const t = freshSnap.data();
+            const queue = t?.queue || [];
+
+            if (queue.length === 0) {
+                console.log('🎫 No one in queue — loser keeps seat');
+                return;
+            }
+
+            // Sort queue by joinedAt to ensure proper order
+            queue.sort((a, b) => a.joinedAt - b.joinedAt);
+
+            // First person in queue takes the loser's seat
+            const nextPlayer = queue[0];
+            const remainingQueue = queue.slice(1);
+
+            console.log(`🎫 Queue processing: ${nextPlayer.name} takes ${loserSide} seat`);
+
+            // Unseat loser, seat next player, update queue
+            const updates = {
+                [loserKey]: {
+                    uid: nextPlayer.uid,
+                    name: nextPlayer.name,
+                    avatar: nextPlayer.avatar || ''
+                },
+                queue: remainingQueue
+            };
+
+            await setDoc(tRef, updates, { merge: true });
+
+            // Send system chat message
+            const gRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'games', this.tid);
+            await setDoc(gRef, {
+                chat: arrayUnion({
+                    user: 'SYSTEM',
+                    text: `🎫 ${nextPlayer.name.toUpperCase()} enters from queue and takes the ${loserSide.toUpperCase()} seat!`,
+                    ts: Date.now()
+                })
+            }, { merge: true });
+
+            this.showStatus(`🎫 ${nextPlayer.name} takes ${loserSide} seat from queue!`, 'gold');
+
+        } catch (error) {
+            console.error('❌ Failed to process queue:', error);
+        }
+    }
+
+    /**
+     * Update queue display in the QUEUE tab
+     */
+    updateQueueDisplay() {
+        const queue = this.table?.queue || [];
+        // Sort by joinedAt
+        const sortedQueue = [...queue].sort((a, b) => a.joinedAt - b.joinedAt);
+
+        // Update count
+        const countEl = document.getElementById('queue-count');
+        if (countEl) countEl.textContent = `${sortedQueue.length} waiting`;
+
+        // Determine my state
+        const isSeated = this.user && (
+            this.table?.playerRed?.uid === this.user.uid ||
+            this.table?.playerBlack?.uid === this.user.uid
+        );
+        const myQueueIdx = this.user ? sortedQueue.findIndex(q => q.uid === this.user.uid) : -1;
+        const inQueue = myQueueIdx >= 0;
+
+        // Show/hide buttons
+        const joinBtn = document.getElementById('btn-join-queue');
+        const leaveBtn = document.getElementById('btn-leave-queue');
+        const myPosEl = document.getElementById('queue-my-position');
+        const statusEl = document.getElementById('queue-status-msg');
+
+        if (joinBtn) joinBtn.style.display = (!isSeated && !inQueue && this.user) ? 'block' : 'none';
+        if (leaveBtn) leaveBtn.style.display = inQueue ? 'block' : 'none';
+
+        if (myPosEl) {
+            if (inQueue) {
+                myPosEl.style.display = 'block';
+                myPosEl.textContent = `🎫 Your position: #${myQueueIdx + 1} of ${sortedQueue.length}`;
+            } else {
+                myPosEl.style.display = 'none';
+            }
+        }
+
+        if (statusEl) {
+            if (isSeated) {
+                statusEl.textContent = 'You are currently seated as a player.';
+            } else if (!this.user) {
+                statusEl.textContent = 'Log in to join the queue.';
+            } else if (inQueue) {
+                statusEl.textContent = myQueueIdx === 0
+                    ? '⚡ You are NEXT to play!'
+                    : `Waiting... ${myQueueIdx} player(s) ahead of you.`;
+            } else {
+                const bothSeated = this.table?.playerRed && this.table?.playerBlack;
+                statusEl.textContent = bothSeated
+                    ? 'Both seats taken. Join the queue to play next!'
+                    : 'A seat is open — you can sit directly from the GAME tab.';
+            }
+        }
+
+        // Render queue list
+        const listEl = document.getElementById('queue-list');
+        if (!listEl) return;
+
+        if (sortedQueue.length === 0) {
+            listEl.innerHTML = '<div class="queue-empty">No one in queue. Join to play next!</div>';
+            return;
+        }
+
+        listEl.innerHTML = sortedQueue.map((q, i) => {
+            const isMe = this.user && q.uid === this.user.uid;
+            const timeAgo = this.formatQueueTime(q.joinedAt);
+            return `<div class="queue-item ${isMe ? 'queue-item-me' : ''}">
+                <div class="queue-num">${i + 1}</div>
+                <div class="queue-item-info">
+                    <div class="queue-item-name">${q.name || 'Anonymous'}${isMe ? ' (YOU)' : ''}</div>
+                    <div class="queue-item-elo">⭐ ${q.elo || 1200}</div>
+                </div>
+                <div class="queue-item-time">${timeAgo}</div>
+            </div>`;
+        }).join('');
+    }
+
+    /**
+     * Format queue join time as relative string
+     */
+    formatQueueTime(ts) {
+        const secs = Math.floor((Date.now() - ts) / 1000);
+        if (secs < 60) return 'just now';
+        const mins = Math.floor(secs / 60);
+        if (mins < 60) return `${mins}m ago`;
+        const hrs = Math.floor(mins / 60);
+        return `${hrs}h ago`;
     }
 
     /**
@@ -3450,109 +4343,14 @@ export class XQApp {
     }
 
     /**
-     * Format move to algebraic notation (e.g., C25, H8+7, R9-1)
-     * Format: [Piece][SourceFile][Direction][Steps/TargetFile]
-     * - Lateral: C25 = Cannon from file 2 to file 5
-     * - Forward: H8+7 = Horse at file 8 moves forward 7 steps
-     * - Backward: R9-1 = Rook at file 9 moves backward 1 step
-     *
-     * IMPORTANT: File numbering in Xiangqi is right-to-left from each player's perspective
-     * - Red: file 1 is on the right (x=8), file 9 is on the left (x=0)
-     * - Black: file 1 is on the right (x=0), file 9 is on the left (x=8)
+     * Format a move as proper Chinese Xiangqi notation (e.g., 炮二平五, 马八进七).
+     * Delegates to moveToChineseNotation which already handles all the rules.
+     * No board state is passed here, so disambiguation (前/后) is skipped —
+     * that is only needed at save time when we have the full running board.
      */
     formatMoveNotation(move) {
         if (!move || !move.from || !move.to) return '???';
-
-        const fx = move.from.x;
-        const fy = move.from.y;
-        const tx = move.to.x;
-        const ty = move.to.y;
-
-        // Get piece letter from the move data
-        let pieceLetter = '';
-        let isRed = true; // Default to red if we can't determine
-
-        if (move.piece) {
-            const pieceMap = {
-                'r': 'R', 'n': 'H', 'e': 'E', 'a': 'A', 'k': 'K', 'c': 'C', 'p': 'P',
-                'R': 'R', 'N': 'H', 'E': 'E', 'A': 'A', 'K': 'K', 'C': 'C', 'P': 'P'
-            };
-            pieceLetter = pieceMap[move.piece] || '';
-            // Determine if piece is red or black from the piece character
-            isRed = move.piece === move.piece.toUpperCase();
-        } else {
-            // Old move without piece data - infer from starting position
-            // Red starts from bottom (y >= 7), Black starts from top (y <= 2)
-            // For moves in between, we need to guess from the move pattern
-            if (fy >= 7) {
-                isRed = true;
-            } else if (fy <= 2) {
-                isRed = false;
-            } else {
-                // For middle positions, check if moving forward (toward opponent)
-                // Red moves up (y decreases), Black moves down (y increases)
-                isRed = ty < fy; // If y decreased, likely Red moving forward
-            }
-        }
-
-        // Convert coordinates to file numbers (1-9)
-        // Red counts right-to-left: x=8 is file 1, x=0 is file 9
-        // Black counts right-to-left from their side: x=0 is file 1, x=8 is file 9
-        let sourceFile, targetFile;
-        if (isRed) {
-            sourceFile = 9 - fx; // x=8 -> file 1, x=0 -> file 9
-            targetFile = 9 - tx;
-        } else {
-            sourceFile = fx + 1; // x=0 -> file 1, x=8 -> file 9
-            targetFile = tx + 1;
-        }
-
-        let notation = '';
-
-        // Determine direction based on color
-        // Red moves from bottom to top (y decreases)
-        // Black moves from top to bottom (y increases)
-
-        // For Horse (H), Elephant (E), Advisor (A): always show target file with +/-
-        // For Rook (R), Cannon (C): show steps for vertical, target file for lateral
-        // For Pawn (P): show steps for vertical (never -), target file for lateral
-        const piecesWithTargetFile = ['H', 'E', 'A'];
-        const usesTargetFile = piecesWithTargetFile.includes(pieceLetter);
-
-        // Check for vertical movement first (takes priority)
-        if (ty !== fy) {
-            // Has vertical component
-            if (isRed) {
-                if (ty < fy) {
-                    // Forward (toward black side, y decreases)
-                    const suffix = usesTargetFile ? targetFile : Math.abs(ty - fy);
-                    notation = `${pieceLetter}${sourceFile}+${suffix}`;
-                } else {
-                    // Backward (toward own side, y increases)
-                    const suffix = usesTargetFile ? targetFile : Math.abs(ty - fy);
-                    notation = `${pieceLetter}${sourceFile}-${suffix}`;
-                }
-            } else {
-                // Black
-                if (ty > fy) {
-                    // Forward (toward red side, y increases)
-                    const suffix = usesTargetFile ? targetFile : Math.abs(ty - fy);
-                    notation = `${pieceLetter}${sourceFile}+${suffix}`;
-                } else {
-                    // Backward (toward own side, y decreases)
-                    const suffix = usesTargetFile ? targetFile : Math.abs(ty - fy);
-                    notation = `${pieceLetter}${sourceFile}-${suffix}`;
-                }
-            }
-        } else if (tx !== fx) {
-            // Pure lateral move (no vertical component)
-            notation = `${pieceLetter}${sourceFile}${targetFile}`;
-        } else {
-            // No movement? Should not happen
-            notation = `${pieceLetter}${sourceFile}`;
-        }
-
-        return notation;
+        return this.moveToChineseNotation(move, null, null);
     }
 
     /**
@@ -3681,7 +4479,7 @@ export class XQApp {
         console.log('⚙️ Initializing settings UI to match loaded settings...');
 
         // Update each setting toggle to match current state
-        ['sound', 'animation', 'music', 'autosave'].forEach(settingName => {
+        ['sound', 'animation', 'music', 'autosave', 'voiceChat'].forEach(settingName => {
             const value = this.settings[settingName];
             const onBtn = document.getElementById(`setting-${settingName}-on`);
             const offBtn = document.getElementById(`setting-${settingName}-off`);
@@ -3697,6 +4495,14 @@ export class XQApp {
                 console.log(`  ${settingName}: ${value ? 'ON' : 'OFF'}`);
             }
         });
+
+        // Initialize voice type selector
+        document.querySelectorAll('.voice-type-btn').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        const activeVoiceBtn = document.getElementById(`voice-type-${this.settings.voiceType}`);
+        if (activeVoiceBtn) activeVoiceBtn.classList.add('active');
+        console.log(`  voiceType: ${this.settings.voiceType}`);
 
         console.log('✅ Settings UI initialized');
     }
@@ -3724,6 +4530,13 @@ export class XQApp {
 
         this.showStatus(`${settingName.charAt(0).toUpperCase() + settingName.slice(1)} ${value ? 'enabled' : 'disabled'}`, value ? '#27ae60' : '#888');
 
+        // If voiceChat toggled ON, reset ready time so new messages will be spoken
+        if (settingName === 'voiceChat' && value) {
+            this._voiceChatReadyTime = Date.now();
+            this._spokenChatIds.clear();
+            console.log('🔊 Voice Chat enabled — listening for new messages from now');
+        }
+
         // If music setting changed, handle music accordingly
         if (settingName === 'music') {
             if (value && this.occupants && this.occupants.length > 0) {
@@ -3733,6 +4546,139 @@ export class XQApp {
                 console.log('🔇 Music disabled, stopping ambient music...');
                 this.stopAmbientMusic();
             }
+        }
+    }
+
+    /**
+     * Set voice character type for Voice Chat TTS
+     */
+    setVoiceType(type) {
+        if (!VOICE_PROFILES[type]) return;
+        this.settings.voiceType = type;
+        localStorage.setItem('xq-setting-voiceType', type);
+
+        const profile = VOICE_PROFILES[type];
+        console.log(`🔊 Voice type changed to: ${profile.emoji} ${profile.label}`);
+        this.showStatus(`Voice: ${profile.emoji} ${profile.label}`, '#f1c40f');
+
+        // Update UI - highlight selected button
+        document.querySelectorAll('.voice-type-btn').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        const activeBtn = document.getElementById(`voice-type-${type}`);
+        if (activeBtn) activeBtn.classList.add('active');
+    }
+
+    /**
+     * Render chat text - highlights voice portions wrapped in () or （） with a speaker icon
+     * Shows the voice character emoji if voiceType is available on the message
+     */
+    renderChatText(text, voiceType) {
+        const profile = VOICE_PROFILES[voiceType] || VOICE_PROFILES['young-lady'];
+        // Match both English () and Chinese （） brackets
+        return text.replace(/(?:\(([^)]+)\)|（([^）]+)）)/g, (match, enInner, cnInner) => {
+            const inner = enInner || cnInner;
+            return `<span style="color:#f1c40f; font-style:italic;" title="Voice: ${profile.label}">${profile.emoji}🔊 ${inner}</span>`;
+        });
+    }
+
+    /**
+     * Get a voice for the given language and gender preference
+     * @param {string} lang - e.g. 'zh-CN' or 'en-US'
+     * @param {string} gender - 'male' or 'female'
+     */
+    _getVoice(lang, gender = 'female') {
+        const voices = window.speechSynthesis.getVoices();
+        if (!voices.length) return null;
+
+        const langPrefix = lang.split('-')[0]; // 'zh' or 'en'
+
+        // Filter voices matching the language
+        const matching = voices.filter(v =>
+            v.lang.startsWith(langPrefix) || v.lang.startsWith(lang)
+        );
+
+        const femaleKeywords = ['female', 'woman', 'zira', 'hazel', 'susan', 'samantha', 'karen', 'moira', 'fiona', 'tessa', 'victoria', 'huihui', 'yaoyao', 'lili', 'xiaoxiao', 'zhiyu'];
+        const maleKeywords = ['male', 'man', 'david', 'mark', 'james', 'richard', 'george', 'kangkang', 'zhiwei', 'daniel'];
+
+        const keywords = gender === 'male' ? maleKeywords : femaleKeywords;
+        const found = matching.find(v => {
+            const name = v.name.toLowerCase();
+            return keywords.some(kw => name.includes(kw));
+        });
+        if (found) {
+            console.log(`🔊 Selected ${gender} voice: ${found.name} (${found.lang})`);
+            return found;
+        }
+
+        // Fallback: first matching voice
+        if (matching.length) {
+            console.log(`🔊 Fallback voice: ${matching[0].name} (${matching[0].lang})`);
+            return matching[0];
+        }
+
+        return null;
+    }
+
+    /**
+     * Voice Chat TTS - speaks text wrapped in parentheses () or （）
+     * Auto-detects language: CJK characters → Mandarin, otherwise English
+     * All users with Voice Chat ON will hear it when a new chat arrives via Firestore
+     */
+    speakVoiceChat(chatArray) {
+        if (!this.settings.voiceChat) return;
+        if (!chatArray || !chatArray.length) return;
+        if (!window.speechSynthesis) return;
+
+        // Only process recent messages
+        const recent = chatArray.slice(-50);
+        for (const m of recent) {
+            // Skip messages from before page loaded (don't replay old chat)
+            if (m.ts < this._voiceChatReadyTime) continue;
+
+            // Create a unique ID for each message
+            const msgId = `${m.user}_${m.ts}_${m.text}`;
+            if (this._spokenChatIds.has(msgId)) continue;
+            this._spokenChatIds.add(msgId);
+
+            // Match both English () and Chinese （） brackets
+            const voiceMatches = m.text.match(/(?:\(([^)]+)\)|（([^）]+)）)/g);
+            if (!voiceMatches) continue;
+
+            console.log(`🔊 Voice Chat detected from ${m.user}:`, voiceMatches);
+
+            // Get voice profile from the message (speaker's chosen voice)
+            const profile = VOICE_PROFILES[m.voiceType] || VOICE_PROFILES['young-lady'];
+
+            for (const match of voiceMatches) {
+                // Extract the inner text (remove the brackets - first/last char)
+                const inner = match.slice(1, -1).trim();
+                if (!inner) continue;
+
+                // Detect if text contains CJK characters (Chinese/Japanese/Korean)
+                const hasCJK = /[\u4e00-\u9fff\u3400-\u4dbf]/.test(inner);
+                const lang = hasCJK ? 'zh-CN' : 'en-US';
+
+                const utterance = new SpeechSynthesisUtterance(inner);
+                utterance.lang = lang;
+                utterance.rate = profile.rate;
+                utterance.pitch = profile.pitch;
+
+                // Pick voice matching the profile's gender
+                const voice = this._getVoice(lang, profile.gender);
+                if (voice) utterance.voice = voice;
+
+                utterance.volume = 1;
+
+                console.log(`🔊 Speaking [${lang}] as ${profile.emoji} ${profile.label}: "${inner}" (from ${m.user}) voice: ${voice?.name || 'default'}`);
+                window.speechSynthesis.speak(utterance);
+            }
+        }
+
+        // Keep the spoken set from growing too large
+        if (this._spokenChatIds.size > 200) {
+            const arr = [...this._spokenChatIds];
+            this._spokenChatIds = new Set(arr.slice(-100));
         }
     }
 
@@ -3885,41 +4831,84 @@ export class XQApp {
      * @param {number} moveIndex - Move number in the game
      * @returns {string} - Chinese notation (e.g., "炮二平五" or "C24")
      */
-    moveToChineseNotation(move, moveIndex) {
-        // For now, return simplified algebraic notation
-        // This can be enhanced later with proper Chinese characters
-        const { from, to, piece, isCapture } = move;
+    moveToChineseNotation(move, moveIndex, board) {
+        const { from, to, piece } = move;
+        if (!piece || from == null || to == null) return '?';
 
-        // Convert piece code to letter
-        const pieceMap = {
-            'R': 'R', 'r': 'R', // Chariot (Rook)
-            'H': 'H', 'h': 'H', // Horse (Knight)
-            'E': 'E', 'e': 'E', // Elephant (Bishop)
-            'A': 'A', 'a': 'A', // Advisor (Guard)
-            'K': 'K', 'k': 'K', // King (General)
-            'C': 'C', 'c': 'C', // Cannon
-            'P': 'P', 'p': 'P'  // Pawn (Soldier)
-        };
+        const isRed = piece === piece.toUpperCase();
+        const pieceUpper = piece.toUpperCase();
 
-        const pieceLetter = pieceMap[piece] || piece;
-        const fromFile = from.x;
-        const fromRank = from.y;
-        const toFile = to.x;
-        const toRank = to.y;
+        // Piece names differ by colour (N = Horse in engine init, same as H)
+        const redNames   = { R:'车', H:'马', N:'马', E:'相', A:'仕', K:'帅', C:'炮', P:'兵' };
+        const blackNames = { R:'车', H:'马', N:'马', E:'象', A:'士', K:'将', C:'炮', P:'卒' };
+        const pieceName  = isRed ? (redNames[pieceUpper]   || piece)
+                                 : (blackNames[pieceUpper] || piece);
 
-        // Determine movement direction
-        let direction;
-        if (fromFile === toFile) {
-            direction = fromRank < toRank ? '+' : '-'; // Forward or backward
+        // File numbers from each player's perspective (1–9)
+        // Red sits at bottom: files increase right-to-left  → file = 9 - col
+        // Black sits at top:  files increase left-to-right  → file = col + 1
+        const fileNum = col => isRed ? (9 - col) : (col + 1);
+
+        const fromFile = fileNum(from.x);
+        const toFile   = fileNum(to.x);
+
+        // Determine direction and destination number
+        let direction, distNum;
+
+        const isOblique = (pieceUpper === 'H' || pieceUpper === 'N' || pieceUpper === 'E');
+
+        if (isOblique || from.x !== to.x) {
+            // Horse, Elephant, or any sideways move
+            if (from.x === to.x) {
+                // Purely vertical (shouldn't happen for H/E but guard it)
+                const adv = isRed ? (to.y < from.y) : (to.y > from.y);
+                direction = adv ? '进' : '退';
+                distNum   = Math.abs(to.y - from.y);
+            } else if (from.y === to.y) {
+                // Purely horizontal (Rook, Cannon, Pawn)
+                direction = '平';
+                distNum   = toFile;
+            } else {
+                // Oblique (Horse / Elephant) or diagonal - use destination file
+                const adv = isRed ? (to.y < from.y) : (to.y > from.y);
+                direction = adv ? '进' : '退';
+                distNum   = toFile;   // standard: destination file for H and E
+            }
         } else {
-            direction = '='; // Horizontal
+            // Same column → vertical move
+            const adv = isRed ? (to.y < from.y) : (to.y > from.y);
+            direction = adv ? '进' : '退';
+            distNum   = Math.abs(to.y - from.y);
         }
 
-        // Calculate distance
-        const distance = Math.abs(fromFile - toFile) + Math.abs(fromRank - toRank);
+        // Chinese numeral lookup (indices 1–9)
+        const chNums = ['','一','二','三','四','五','六','七','八','九'];
 
-        // Return simplified notation (e.g., "C24", "H2+3")
-        return `${pieceLetter}${fromFile}${direction}${distance}`;
+        // Disambiguation: if another piece of the same type sits on the same column,
+        // replace the file-number prefix with 前 (front) or 后 (rear).
+        let prefix = chNums[fromFile] || String(fromFile);
+        if (board) {
+            const twins = [];
+            for (let row = 0; row < 10; row++) {
+                const cell = board[row]?.[from.x];
+                if (cell && cell === piece && row !== from.y) {
+                    twins.push(row);
+                }
+            }
+            if (twins.length > 0) {
+                // 前 = the piece nearer the opponent's home rank
+                // Red advances toward lower y → smaller y is "前"
+                // Black advances toward higher y → larger y is "前"
+                const otherRow = twins[0];
+                const isFront  = isRed ? (from.y < otherRow) : (from.y > otherRow);
+                prefix = isFront ? '前' : '后';
+            }
+        }
+
+        // Convert destination number to Chinese numeral
+        const distCn = chNums[distNum] || String(distNum);
+
+        return `${pieceName}${prefix}${direction}${distCn}`;
     }
 
     /**
@@ -3943,21 +4932,13 @@ export class XQApp {
 
             // Check if there's a game to save
             if (!this.gameState) {
-                this.showStatus("No game data to save!", "red");
+                alert('⚠️ No game data to save!');
                 return;
             }
 
             const history = this.gameState.history || [];
             if (history.length === 0) {
-                this.showStatus("No moves to save - play some moves first!", "red");
-                return;
-            }
-
-            // If game already ended and was auto-saved, inform user
-            const saveKey = `${this.tid}_histor_saved`;
-            if (this[saveKey] && this.gameState.status !== 'playing') {
-                this.showStatus("✅ Game was already saved automatically!", "gold");
-                console.log('ℹ️ Manual save skipped - game already auto-saved after ending');
+                alert('⚠️ No moves to save - play some moves first!');
                 return;
             }
 
@@ -3971,14 +4952,17 @@ export class XQApp {
                 reason = 'manual-save';
             }
 
-            // Reset the duplicate save flag to allow manual save
+            // Reset the in-memory save flag and force override ALL duplicate checks
+            const saveKey = `${this.tid}_histor_saved`;
             this[saveKey] = false;
 
-            // Call the actual save function
-            await this.saveGameToHistory(winner, reason);
+            // Call with forceOverride=true — bypasses historySaved flag AND duplicate query
+            await this.saveGameToHistory(winner, reason, true);
 
-            this.showStatus("✅ Game saved to history!", "gold");
-            console.log('✅ Manual save completed successfully');
+            // saveGameToHistory sets saveKey=true only after a successful write
+            if (!this[saveKey]) {
+                alert('⚠️ Manual save did not complete.\n\nCheck browser console (F12) for details.');
+            }
 
         } catch (error) {
             console.error('❌ Manual save error:', error);
@@ -3992,30 +4976,145 @@ export class XQApp {
      * @param {string} winner - 'red', 'black', or 'draw'
      * @param {string} reason - 'checkmate', 'resignation', 'draw', 'timeout', etc.
      */
-    async saveGameToHistory(winner, reason) {
+    async saveGameToHistory(winner, reason, forceOverride = false) {
         const saveKey = `${this.tid}_histor_saved`;
         try {
-            console.log('💾 Saving game to history...', { winner, reason });
+            console.log('💾 Saving game to history...', { winner, reason, forceOverride });
 
-            // Prevent duplicate saves - check if already saved for this game
-            if (this[saveKey]) {
-                console.log('⚠️ Game already saved to history, skipping duplicate save');
-                return;
+            // ========== DUPLICATE CHECK: Firestore-based (survives page refresh, works across clients) ==========
+            if (!forceOverride) {
+                // Check game document for historySaved flag (source of truth)
+                const gameRefCheck = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'games', this.tid);
+                const freshCheck = await getDoc(gameRefCheck);
+                if (freshCheck.exists() && freshCheck.data()?.historySaved) {
+                    console.log('✅ Game already saved (confirmed from Firestore historySaved flag)');
+                    this[saveKey] = true;
+                    this.showStatus("✅ Game already saved!", "gold");
+                    return false;
+                }
             }
-            this[saveKey] = true;
 
-            // Ensure both players exist
-            if (!this.table?.playerRed?.uid || !this.table?.playerBlack?.uid) {
-                console.log('⚠️ Cannot save game - missing player data');
-                console.log('  playerRed:', JSON.stringify(this.table?.playerRed));
-                console.log('  playerBlack:', JSON.stringify(this.table?.playerBlack));
+            // Also check in-memory flag as fast guard (non-authoritative)
+            if (this[saveKey] && !forceOverride) {
+                console.log('⚠️ Game already saved to history (in-memory flag), skipping duplicate save');
+                return false;
+            }
+
+            // Get player data - prefer cached data from game start (most reliable),
+            // fall back to current table data
+            let redPlayer = this._cachedPlayers?.red?.uid
+                ? this._cachedPlayers.red
+                : this.table?.playerRed;
+            let blackPlayer = this._cachedPlayers?.black?.uid
+                ? this._cachedPlayers.black
+                : this.table?.playerBlack;
+
+            // 3rd fallback: read player data from the game document itself
+            // (stored there since engageBattle now saves playerRed/playerBlack to game doc)
+            if (!redPlayer?.uid || !blackPlayer?.uid) {
+                console.log('⚠️ Player data missing from cache and table, trying game document...');
+                try {
+                    const gameRefForPlayers = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'games', this.tid);
+                    const gameSnapForPlayers = await getDoc(gameRefForPlayers);
+                    if (gameSnapForPlayers.exists()) {
+                        const gd = gameSnapForPlayers.data();
+                        if (!redPlayer?.uid && gd.playerRed?.uid) {
+                            redPlayer = gd.playerRed;
+                            console.log('✅ Got red player from game doc:', redPlayer.uid);
+                        }
+                        if (!blackPlayer?.uid && gd.playerBlack?.uid) {
+                            blackPlayer = gd.playerBlack;
+                            console.log('✅ Got black player from game doc:', blackPlayer.uid);
+                        }
+                    }
+                } catch (e) {
+                    console.log('⚠️ Failed to read game doc for player data:', e.message);
+                }
+            }
+
+            // 4th fallback: read player data from the table document in Firestore
+            // (table doc may still have player data even if local this.table was cleared)
+            if (!redPlayer?.uid || !blackPlayer?.uid) {
+                console.log('⚠️ Still missing player data, trying table document...');
+                try {
+                    const tableRefForPlayers = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'regions', this.rid, 'tables', this.tid);
+                    const tableSnapForPlayers = await getDoc(tableRefForPlayers);
+                    if (tableSnapForPlayers.exists()) {
+                        const td = tableSnapForPlayers.data();
+                        if (!redPlayer?.uid && td.playerRed?.uid) {
+                            redPlayer = td.playerRed;
+                            console.log('✅ Got red player from table doc:', redPlayer.uid);
+                        }
+                        if (!blackPlayer?.uid && td.playerBlack?.uid) {
+                            blackPlayer = td.playerBlack;
+                            console.log('✅ Got black player from table doc:', blackPlayer.uid);
+                        }
+                    }
+                } catch (e) {
+                    console.log('⚠️ Failed to read table doc for player data:', e.message);
+                }
+            }
+
+            // 5th fallback: use table occupants + usernames registry to identify players
+            if (!redPlayer?.uid || !blackPlayer?.uid) {
+                console.log('⚠️ Trying occupants + usernames registry fallback...');
+                try {
+                    // Get occupants from table
+                    const tableRefOcc = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'regions', this.rid, 'tables', this.tid);
+                    const tableSnapOcc = await getDoc(tableRefOcc);
+                    const tableDataOcc = tableSnapOcc.exists() ? tableSnapOcc.data() : {};
+                    const occupants = tableDataOcc.occupants || [];
+
+                    // Also check game chat for player UIDs/names
+                    const gameRefChat = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'games', this.tid);
+                    const gameSnapChat = await getDoc(gameRefChat);
+                    const gameDataChat = gameSnapChat.exists() ? gameSnapChat.data() : {};
+
+                    // Collect all known UIDs from occupants
+                    const knownUids = new Set();
+                    occupants.forEach(o => {
+                        if (typeof o === 'string') knownUids.add(o);
+                        else if (o?.uid) knownUids.add(o.uid);
+                    });
+
+                    // If we have exactly 2 UIDs and need both players, look them up
+                    if (knownUids.size >= 2) {
+                        const uidArray = [...knownUids];
+                        // Look up profiles for these UIDs
+                        for (const uid of uidArray) {
+                            try {
+                                const profileRef = doc(this.db, 'artifacts', this.appId, 'users', uid, 'profile', 'data');
+                                const profileSnap = await getDoc(profileRef);
+                                if (profileSnap.exists()) {
+                                    const profile = profileSnap.data();
+                                    console.log(`  Found profile for ${uid}: ${profile.playerName}`);
+                                }
+                            } catch (e) { /* skip */ }
+                        }
+                        // We found UIDs but don't know who was red/black
+                        // Check if the game doc has any hints (like who moved first)
+                        console.log('  Found UIDs from occupants but cannot determine red/black assignment');
+                    }
+                } catch (e) {
+                    console.log('⚠️ Occupants fallback failed:', e.message);
+                }
+            }
+
+            if (!redPlayer?.uid || !blackPlayer?.uid) {
+                console.log('⚠️ Cannot save game - missing player data after all fallbacks');
+                console.log('  playerRed:', JSON.stringify(redPlayer));
+                console.log('  playerBlack:', JSON.stringify(blackPlayer));
+                console.log('  cachedPlayers:', JSON.stringify(this._cachedPlayers));
                 this[saveKey] = false;
-                this.showStatus("⚠️ Cannot save - missing player data", "red");
+                alert('⚠️ Cannot save - player data missing.\n\nUse recover-game-v2.html to recover this game.');
                 return;
             }
 
-            const redPlayer = this.table.playerRed;
-            const blackPlayer = this.table.playerBlack;
+            console.log('📋 Using player data:', {
+                red: redPlayer.name || redPlayer.uid,
+                black: blackPlayer.name || blackPlayer.uid,
+                source: this.table?.playerRed?.uid ? 'table' : 'cache'
+            });
 
             // Get game data - retry up to 3 times with delay to handle Firestore latency
             const gameRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'games', this.tid);
@@ -4032,7 +5131,7 @@ export class XQApp {
                         continue;
                     }
                     this[saveKey] = false;
-                    this.showStatus("⚠️ Game data not found - record not saved", "red");
+                    alert('⚠️ Game data not found in Firestore - record not saved.');
                     return;
                 }
 
@@ -4057,21 +5156,27 @@ export class XQApp {
             if (history.length === 0) {
                 console.log('⚠️ No moves to save - game has no history even after retries');
                 this[saveKey] = false;
-                this.showStatus("⚠️ No moves to save - game record not saved", "red");
+                alert('⚠️ No moves found in game history - record not saved.');
                 return;
             }
 
             console.log(`📋 Got ${history.length} moves from history`);
 
             // Convert history to both ICCS and Chinese notation (with safety checks)
+            // Maintain a running board so moveToChineseNotation can disambiguate pieces
             const movesICCS = [];
             const movesChinese = [];
+            let runningBoard = this.engine.init(); // fresh starting position
             for (let i = 0; i < history.length; i++) {
                 const move = history[i];
                 try {
                     if (move?.from && move?.to) {
                         movesICCS.push(this.moveToICCS(move));
-                        movesChinese.push(this.moveToChineseNotation(move, i));
+                        // Pass board state BEFORE this move for disambiguation
+                        movesChinese.push(this.moveToChineseNotation(move, i, runningBoard));
+                        // Advance the running board
+                        runningBoard[move.to.y][move.to.x] = runningBoard[move.from.y][move.from.x];
+                        runningBoard[move.from.y][move.from.x] = null;
                     } else {
                         console.warn(`⚠️ Skipping malformed move at index ${i}:`, move);
                         movesICCS.push(`?${i}`);
@@ -4202,20 +5307,101 @@ export class XQApp {
                         }
                     };
 
-                    // Update player profiles with new ELO ratings (use setDoc with merge to create if doesn't exist)
-                    await setDoc(redProfileRef, {
-                        elo: eloChanges.red.newRating,
-                        gamesPlayed: redGamesPlayed + 1,
-                        lastGameAt: gameEndTime
-                    }, { merge: true });
+                    // ========== ELO PROFILE WRITES — RED PLAYER ONLY ==========
+                    // Only the RED player's browser writes ELO to both profiles.
+                    // Reason: Firestore rule "request.auth.uid == userId" means BLACK's browser
+                    // cannot write to RED's profile/data document (permission denied).
+                    // RED's browser is always authenticated as the RED-seat user and can write
+                    // to its own profile (redProfileRef). BLACK's profile (blackProfileRef) uses
+                    // the same rule but with userId=blackPlayer.uid — RED's browser CAN write
+                    // another user's profile only if the rule allowed it. Wait — RED also cannot
+                    // write BLACK's profile by the same rule!
+                    //
+                    // SOLUTION: Each player writes only THEIR OWN profile.
+                    // RED writes redProfileRef (their own). BLACK writes blackProfileRef (their own).
+                    // Both calculations still happen for gameRecord.eloChanges display data.
+                    const iAmRed = this.user?.uid === redPlayer?.uid;
+                    const iAmBlack = this.user?.uid === blackPlayer?.uid;
 
-                    await setDoc(blackProfileRef, {
-                        elo: eloChanges.black.newRating,
-                        gamesPlayed: blackGamesPlayed + 1,
-                        lastGameAt: gameEndTime
-                    }, { merge: true });
+                    // Update own profile with new ELO rating
+                    if (iAmRed) {
+                        await setDoc(redProfileRef, {
+                            elo: eloChanges.red.newRating,
+                            gamesPlayed: redGamesPlayed + 1,
+                            lastGameAt: gameEndTime
+                        }, { merge: true });
+                        console.log('✅ RED profile updated with new ELO rating');
+                    } else if (iAmBlack) {
+                        await setDoc(blackProfileRef, {
+                            elo: eloChanges.black.newRating,
+                            gamesPlayed: blackGamesPlayed + 1,
+                            lastGameAt: gameEndTime
+                        }, { merge: true });
+                        console.log('✅ BLACK profile updated with new ELO rating');
+                    } else {
+                        console.log('ℹ️ Observer — skipping own profile ELO write');
+                    }
 
-                    console.log('✅ Player profiles updated with new ELO ratings');
+                    // ========== UPDATE LEADERBOARD & PLAYER-STATS — RED PLAYER ONLY ==========
+                    // These shared documents only need one writer per game. RED's browser handles it.
+                    if (iAmRed) {
+                        // ========== UPDATE LEADERBOARD IMMEDIATELY ==========
+                        try {
+                            await this.updateLeaderboardAfterGame(
+                                redPlayer, blackPlayer,
+                                eloChanges, winner,
+                                redGamesPlayed + 1, blackGamesPlayed + 1,
+                                gameEndTime
+                            );
+                            console.log('✅ Leaderboard updated in real-time');
+                        } catch (lbError) {
+                            console.warn('⚠️ Leaderboard update failed (non-critical):', lbError);
+                        }
+
+                        // ========== UPDATE PLAYER-STATS SINGLE DOCUMENT ==========
+                        // One document with all players' ELO, wins, losses, draws, gamesPlayed
+                        try {
+                            const statsRef = doc(this.db, 'artifacts', this.appId, 'player-stats', 'current');
+                            const redWinDelta = winner === 'red' ? 1 : 0;
+                            const redLossDelta = winner === 'black' ? 1 : 0;
+                            const redDrawDelta = winner === 'draw' ? 1 : 0;
+                            const blackWinDelta = winner === 'black' ? 1 : 0;
+                            const blackLossDelta = winner === 'red' ? 1 : 0;
+                            const blackDrawDelta = winner === 'draw' ? 1 : 0;
+
+                            // Read current stats, update, write back
+                            const statsSnap = await getDoc(statsRef);
+                            const allStats = statsSnap.exists() ? statsSnap.data() : {};
+
+                            allStats[redPlayer.uid] = {
+                                playerName: redPlayer.playerName || redPlayer.name || 'Unknown',
+                                elo: eloChanges.red.newRating,
+                                gamesPlayed: (redGamesPlayed || 0) + 1,
+                                wins: ((allStats[redPlayer.uid]?.wins) || 0) + redWinDelta,
+                                losses: ((allStats[redPlayer.uid]?.losses) || 0) + redLossDelta,
+                                draws: ((allStats[redPlayer.uid]?.draws) || 0) + redDrawDelta,
+                                lastGameAt: gameEndTime
+                            };
+
+                            allStats[blackPlayer.uid] = {
+                                playerName: blackPlayer.playerName || blackPlayer.name || 'Unknown',
+                                elo: eloChanges.black.newRating,
+                                gamesPlayed: (blackGamesPlayed || 0) + 1,
+                                wins: ((allStats[blackPlayer.uid]?.wins) || 0) + blackWinDelta,
+                                losses: ((allStats[blackPlayer.uid]?.losses) || 0) + blackLossDelta,
+                                draws: ((allStats[blackPlayer.uid]?.draws) || 0) + blackDrawDelta,
+                                lastGameAt: gameEndTime
+                            };
+
+                            allStats._updatedAt = Date.now();
+                            await setDoc(statsRef, allStats);
+                            console.log('✅ Player-stats single document updated');
+                        } catch (statsErr) {
+                            console.warn('⚠️ Player-stats update failed (non-critical):', statsErr);
+                        }
+                    } else {
+                        console.log('ℹ️ Leaderboard/player-stats writes handled by RED player browser');
+                    }
                 } catch (eloError) {
                     // ELO failure should NOT prevent game record from being saved
                     console.error('⚠️ ELO calculation failed, saving game record without ELO:', eloError);
@@ -4228,27 +5414,15 @@ export class XQApp {
             // Import collection and query functions
             const { collection, query, where, orderBy, limit, getDocs, deleteDoc } = await import('https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js');
 
-            // ========== DUPLICATE CHECK ==========
-            // For completed games, check if this table already has a saved record with same move count
-            // This prevents double-saves from manual save after auto-save, or race conditions
-            if (winner !== 'in-progress') {
-                try {
-                    const centralCollection = collection(this.db, 'artifacts', this.appId, 'public', 'data', 'all-game-history');
-                    const dupQuery = query(centralCollection, where('tableId', '==', this.tid), where('totalMoves', '==', history.length));
-                    const dupSnap = await getDocs(dupQuery);
-                    if (!dupSnap.empty) {
-                        console.log(`⚠️ Duplicate detected: table ${this.tid} with ${history.length} moves already saved. Skipping.`);
-                        this.showStatus("✅ Game already saved!", "gold");
-                        return;
-                    }
-                } catch (dupErr) {
-                    console.warn('⚠️ Duplicate check failed (proceeding with save):', dupErr);
-                }
-            }
+            // NOTE: totalMoves duplicate check removed — it falsely blocked saves when two
+            // consecutive games on the same table ended with the same move count.
+            // The historySaved Firestore flag (checked at the top of this function) is the
+            // correct deduplication mechanism. The uniqueGameId doc ID makes setDoc idempotent.
 
             // ========== CENTRALIZED SAVE (source of truth) ==========
             const centralRef = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'all-game-history', uniqueGameId);
             await setDoc(centralRef, gameRecord);
+            this[saveKey] = true; // Mark as saved only after successful write
             console.log('✅ Game saved to CENTRALIZED all-game-history collection');
 
             // ========== PER-PLAYER SAVE (backward compatibility) ==========
@@ -4279,15 +5453,108 @@ export class XQApp {
             }
 
             console.log('✅ Game history saved successfully');
+
+            // ========== MARK GAME AS SAVED IN FIRESTORE (source of truth) ==========
+            // This flag tells ALL clients "this game has been saved, don't save again"
+            try {
+                const gameRefMark = doc(this.db, 'artifacts', this.appId, 'public', 'data', 'games', this.tid);
+                await setDoc(gameRefMark, { historySaved: true, historySavedAt: Date.now() }, { merge: true });
+                console.log('✅ historySaved flag written to game document');
+            } catch (markErr) {
+                console.warn('⚠️ Could not write historySaved flag:', markErr);
+            }
+
             this.showStatus("✅ Game record saved!", "gold");
+            alert('✅ Game record saved successfully!');
+            this.resetRoomActivity(); // Game ended resets room inactivity timer
 
         } catch (error) {
             console.error('❌ Error saving game to history:', error);
             console.error('❌ Error details:', error.message, error.stack);
             // Reset save flag so retry is possible
             this[saveKey] = false;
-            // Show error to user so they know the save failed
-            this.showStatus("⚠️ Failed to save game: " + error.message, "red");
+            // Show PERSISTENT error to user so they know the save failed
+            alert('⚠️ Failed to save game record!\n\nError: ' + error.message + '\n\nPlease try clicking SAVE GAME TO HISTORY button.');
         }
+    }
+
+    /**
+     * Update the centralized leaderboard document immediately after a game ends.
+     * Reads the current leaderboard, updates both players' entries, and writes back.
+     */
+    async updateLeaderboardAfterGame(redPlayer, blackPlayer, eloChanges, winner, redGamesPlayed, blackGamesPlayed, gameEndTime) {
+        const leaderboardRef = doc(this.db, 'artifacts', this.appId, 'leaderboard', 'rankings');
+        const leaderboardSnap = await getDoc(leaderboardRef);
+
+        let players = [];
+        if (leaderboardSnap.exists()) {
+            players = leaderboardSnap.data().players || [];
+        }
+
+        // Helper to determine win/loss/draw increments for a player
+        const getResultDeltas = (playerColor) => {
+            if (winner === 'draw') return { wins: 0, losses: 0, draws: 1 };
+            if (winner === playerColor) return { wins: 1, losses: 0, draws: 0 };
+            return { wins: 0, losses: 1, draws: 0 };
+        };
+
+        const redDeltas = getResultDeltas('red');
+        const blackDeltas = getResultDeltas('black');
+
+        // Update or insert Red player
+        const redIdx = players.findIndex(p => p.uid === redPlayer.uid);
+        if (redIdx >= 0) {
+            players[redIdx].elo = eloChanges.red.newRating;
+            players[redIdx].gamesPlayed = redGamesPlayed;
+            players[redIdx].wins = (players[redIdx].wins || 0) + redDeltas.wins;
+            players[redIdx].losses = (players[redIdx].losses || 0) + redDeltas.losses;
+            players[redIdx].draws = (players[redIdx].draws || 0) + redDeltas.draws;
+            players[redIdx].lastGameAt = gameEndTime;
+        } else {
+            players.push({
+                uid: redPlayer.uid,
+                playerName: redPlayer.playerName || redPlayer.name || 'Unknown',
+                elo: eloChanges.red.newRating,
+                gamesPlayed: redGamesPlayed,
+                wins: redDeltas.wins,
+                losses: redDeltas.losses,
+                draws: redDeltas.draws,
+                lastGameAt: gameEndTime
+            });
+        }
+
+        // Update or insert Black player
+        const blackIdx = players.findIndex(p => p.uid === blackPlayer.uid);
+        if (blackIdx >= 0) {
+            players[blackIdx].elo = eloChanges.black.newRating;
+            players[blackIdx].gamesPlayed = blackGamesPlayed;
+            players[blackIdx].wins = (players[blackIdx].wins || 0) + blackDeltas.wins;
+            players[blackIdx].losses = (players[blackIdx].losses || 0) + blackDeltas.losses;
+            players[blackIdx].draws = (players[blackIdx].draws || 0) + blackDeltas.draws;
+            players[blackIdx].lastGameAt = gameEndTime;
+        } else {
+            players.push({
+                uid: blackPlayer.uid,
+                playerName: blackPlayer.playerName || blackPlayer.name || 'Unknown',
+                elo: eloChanges.black.newRating,
+                gamesPlayed: blackGamesPlayed,
+                wins: blackDeltas.wins,
+                losses: blackDeltas.losses,
+                draws: blackDeltas.draws,
+                lastGameAt: gameEndTime
+            });
+        }
+
+        // Sort by ELO descending
+        players.sort((a, b) => b.elo - a.elo);
+
+        // Save updated leaderboard
+        await setDoc(leaderboardRef, {
+            players: players,
+            updatedAt: Date.now(),
+            totalPlayers: players.length
+        });
+
+        console.log(`🏆 Leaderboard updated: ${players.length} players, top player: ${players[0]?.playerName}`);
     }
 }

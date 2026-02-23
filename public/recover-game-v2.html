@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Recover Lost Game - CHSprimary vs supersushi</title>
+    <style>
+        body { font-family: monospace; padding: 20px; background: #1e293b; color: white; max-width: 800px; margin: 0 auto; }
+        h1 { color: #10b981; }
+        .info { color: #3b82f6; background: #1e3a8a; padding: 15px; margin: 15px 0; border-radius: 8px; }
+        .success { color: #10b981; background: #064e3b; padding: 15px; margin: 15px 0; border-radius: 8px; font-weight: bold; }
+        .error { color: #ef4444; background: #7f1d1d; padding: 15px; margin: 15px 0; border-radius: 8px; }
+        .warning { color: #f59e0b; background: #78350f; padding: 15px; margin: 15px 0; border-radius: 8px; border: 2px solid #f59e0b; }
+        button { padding: 15px 30px; margin: 10px 0; font-size: 18px; cursor: pointer; background: #10b981; color: white; border: none; border-radius: 8px; font-weight: bold; }
+        button:hover { background: #059669; }
+        button.preview { background: #3b82f6; }
+        button.preview:hover { background: #2563eb; }
+        code { background: #0f172a; padding: 2px 6px; border-radius: 4px; color: #10b981; }
+        pre { background: #0f172a; padding: 15px; border-radius: 8px; overflow-x: auto; font-size: 12px; max-height: 300px; overflow-y: auto; }
+    </style>
+</head>
+<body>
+    <h1>🔧 Recover Lost Game Record (v2 - With Moves)</h1>
+
+    <div class="info">
+        <strong>Game Details:</strong><br>
+        • CHSprimary (Red) vs supersushi (Black)<br>
+        • Result: <strong>supersushi wins</strong> (Black wins by resignation)<br>
+        • Table: pJKq5Rpf7mEmkcX4AmZo, Region: 74hFIMWHF3eKzLxl9ZX0<br>
+        • Game data (moves) IS still in Firestore game document<br>
+        • saveGameToHistory failed due to missing player data (now fixed)
+    </div>
+
+    <div class="warning">
+        <strong>⚠️ This will:</strong><br>
+        1. Read the ACTUAL game data (moves, board) from Firestore game document<br>
+        2. Look up both players' current ELO from their profiles<br>
+        3. Calculate proper ELO changes using the ELO system<br>
+        4. Create game record with REAL moves in centralized + per-player history<br>
+        5. Update both players' profiles (ELO, gamesPlayed)<br>
+        6. Update the leaderboard<br>
+        7. Also delete the old broken recovery record (with 0 moves) if it exists
+    </div>
+
+    <button class="preview" onclick="previewGame()">👁️ PREVIEW GAME DATA FIRST</button>
+    <button onclick="recoverGame()">🎯 RECOVER GAME WITH REAL MOVES</button>
+
+    <div id="output"></div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc, getDocs, deleteDoc, collection, query, where } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { eloSystem } from './game/elo-system.js';
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyDq_LECOrc4SY90SyDsBQGmwl-YnUNFIj8",
+            authDomain: "xiangqi-sq.firebaseapp.com",
+            projectId: "xiangqi-sq",
+            storageBucket: "xiangqi-sq.firebasestorage.app",
+            messagingSenderId: "351923336298",
+            appId: "1:351923336298:web:e7278ea095ba085ac4935b"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = "sg-xiangqi";
+
+        const TABLE_ID = "pJKq5Rpf7mEmkcX4AmZo";
+        const REGION_ID = "74hFIMWHF3eKzLxl9ZX0";
+
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                document.getElementById('output').innerHTML = '<p class="info">✅ Logged in as: ' + user.email + '</p>';
+            } else {
+                window.location.href = 'index.html';
+            }
+        });
+
+        // Preview the game data without saving
+        window.previewGame = async function() {
+            const output = document.getElementById('output');
+            output.innerHTML = '<p class="info">🔍 Reading game document from Firestore...</p>';
+
+            try {
+                const gameRef = doc(db, 'artifacts', appId, 'public', 'data', 'games', TABLE_ID);
+                const gameSnap = await getDoc(gameRef);
+
+                if (!gameSnap.exists()) {
+                    output.innerHTML += '<p class="error">❌ Game document not found!</p>';
+                    return;
+                }
+
+                const gameData = gameSnap.data();
+                const history = gameData.history || [];
+                const moveHistory = gameData.moveHistory || [];
+
+                output.innerHTML += `<p class="success">✅ Game document found!</p>`;
+                output.innerHTML += `<p class="info">
+                    <strong>Game Status:</strong> ${gameData.status}<br>
+                    <strong>Winner:</strong> ${gameData.winner || 'N/A'}<br>
+                    <strong>Reason:</strong> ${gameData.reason || 'N/A'}<br>
+                    <strong>History entries:</strong> ${history.length}<br>
+                    <strong>MoveHistory entries:</strong> ${moveHistory.length}<br>
+                    <strong>Board:</strong> ${gameData.board ? 'Present' : 'Missing'}<br>
+                    <strong>Started:</strong> ${gameData.startedAt ? new Date(gameData.startedAt).toLocaleString() : 'N/A'}<br>
+                    <strong>Finished:</strong> ${gameData.finishedAt ? new Date(gameData.finishedAt).toLocaleString() : 'N/A'}
+                </p>`;
+
+                if (history.length > 0) {
+                    output.innerHTML += `<p class="success">📋 Move history (${history.length} moves):</p>`;
+                    output.innerHTML += `<pre>${JSON.stringify(history, null, 2)}</pre>`;
+                }
+
+                if (moveHistory.length > 0) {
+                    output.innerHTML += `<p class="success">📋 MoveHistory (${moveHistory.length} entries):</p>`;
+                    output.innerHTML += `<pre>${JSON.stringify(moveHistory.slice(0, 5), null, 2)}${moveHistory.length > 5 ? '\n... and ' + (moveHistory.length - 5) + ' more' : ''}</pre>`;
+                }
+
+                // Show all fields
+                output.innerHTML += `<p class="info"><strong>All game document fields:</strong></p>`;
+                const keys = Object.keys(gameData);
+                output.innerHTML += `<pre>${keys.join(', ')}</pre>`;
+
+            } catch (error) {
+                output.innerHTML += `<p class="error">❌ Error: ${error.message}</p>`;
+                console.error(error);
+            }
+        };
+
+        window.recoverGame = async function() {
+            const output = document.getElementById('output');
+            output.innerHTML = '<p class="info">🔄 Starting recovery with real game data...</p>';
+
+            try {
+                // Step 0: Read the actual game document
+                output.innerHTML += '<p class="info">📖 Reading game document...</p>';
+                const gameRef = doc(db, 'artifacts', appId, 'public', 'data', 'games', TABLE_ID);
+                const gameSnap = await getDoc(gameRef);
+
+                if (!gameSnap.exists()) {
+                    output.innerHTML += '<p class="error">❌ Game document not found!</p>';
+                    return;
+                }
+
+                const gameData = gameSnap.data();
+                const history = gameData.history || [];
+                const moveHistory = gameData.moveHistory || [];
+
+                output.innerHTML += `<p class="success">✅ Game data found: ${history.length} history entries, ${moveHistory.length} moveHistory entries</p>`;
+
+                // Step 1: Find player UIDs from usernames registry
+                output.innerHTML += '<p class="info">🔍 Looking up player UIDs...</p>';
+
+                const usernamesRef = collection(db, 'artifacts', appId, 'public', 'data', 'usernames');
+                const usernamesSnap = await getDocs(usernamesRef);
+
+                let redUid = null, blackUid = null;
+                let redName = 'CHSprimary', blackName = 'supersushi';
+
+                usernamesSnap.forEach(d => {
+                    const data = d.data();
+                    const name = (data.username || d.id).toLowerCase();
+                    if (name === 'chsprimary') { redUid = data.uid; redName = data.username || d.id; }
+                    if (name === 'supersushi') { blackUid = data.uid; blackName = data.username || d.id; }
+                });
+
+                // Also try to get player data from game document itself
+                if (!redUid && gameData.playerRed?.uid) { redUid = gameData.playerRed.uid; redName = gameData.playerRed.name || gameData.playerRed.playerName || 'CHSprimary'; }
+                if (!blackUid && gameData.playerBlack?.uid) { blackUid = gameData.playerBlack.uid; blackName = gameData.playerBlack.name || gameData.playerBlack.playerName || 'supersushi'; }
+
+                if (!redUid || !blackUid) {
+                    output.innerHTML += `<p class="error">❌ Could not find players. Red UID: ${redUid}, Black UID: ${blackUid}</p>`;
+                    return;
+                }
+
+                output.innerHTML += `<p class="success">✅ Red (${redName}): ${redUid}</p>`;
+                output.innerHTML += `<p class="success">✅ Black (${blackName}): ${blackUid}</p>`;
+
+                // Step 2: Load current profiles
+                const redProfileRef = doc(db, 'artifacts', appId, 'users', redUid, 'profile', 'data');
+                const blackProfileRef = doc(db, 'artifacts', appId, 'users', blackUid, 'profile', 'data');
+
+                const [redSnap, blackSnap] = await Promise.all([getDoc(redProfileRef), getDoc(blackProfileRef)]);
+                const redProfile = redSnap.exists() ? redSnap.data() : {};
+                const blackProfile = blackSnap.exists() ? blackSnap.data() : {};
+
+                const redCurrentELO = redProfile.elo || 1200;
+                const blackCurrentELO = blackProfile.elo || 1200;
+                const redGamesPlayed = redProfile.gamesPlayed || 0;
+                const blackGamesPlayed = blackProfile.gamesPlayed || 0;
+
+                output.innerHTML += `<p class="info">📊 Red ELO: ${redCurrentELO} (${redGamesPlayed} games)</p>`;
+                output.innerHTML += `<p class="info">📊 Black ELO: ${blackCurrentELO} (${blackGamesPlayed} games)</p>`;
+
+                // Step 3: Calculate ELO changes (Black wins by resignation)
+                const winner = gameData.winner || 'black';
+                const reason = gameData.reason || 'resignation';
+
+                const eloChanges = eloSystem.calculateGameRatings({
+                    redPlayer: { uid: redUid, elo: redCurrentELO, gamesPlayed: redGamesPlayed },
+                    blackPlayer: { uid: blackUid, elo: blackCurrentELO, gamesPlayed: blackGamesPlayed },
+                    winner: winner
+                });
+
+                output.innerHTML += `<p class="info">🎯 ELO Changes (${winner} wins by ${reason}):</p>`;
+                output.innerHTML += `<p class="info">  Red: ${redCurrentELO} → ${eloChanges.red.newRating} (${eloSystem.formatELOChange(eloChanges.red.change)})</p>`;
+                output.innerHTML += `<p class="info">  Black: ${blackCurrentELO} → ${eloChanges.black.newRating} (${eloSystem.formatELOChange(eloChanges.black.change)})</p>`;
+
+                // Step 4: Build move arrays from history
+                let movesICCS = [];
+                let movesChinese = [];
+                const totalMoves = Math.max(history.length, moveHistory.length);
+
+                // Extract ICCS moves from history array
+                if (history.length > 0) {
+                    history.forEach(h => {
+                        if (typeof h === 'string') {
+                            movesICCS.push(h);
+                        } else if (h && h.move) {
+                            movesICCS.push(h.move);
+                        } else if (h && h.iccs) {
+                            movesICCS.push(h.iccs);
+                        }
+                    });
+                }
+
+                // Extract Chinese moves from moveHistory if available
+                if (moveHistory.length > 0) {
+                    moveHistory.forEach(m => {
+                        if (typeof m === 'string') {
+                            movesChinese.push(m);
+                        } else if (m && m.chinese) {
+                            movesChinese.push(m.chinese);
+                        } else if (m && m.text) {
+                            movesChinese.push(m.text);
+                        }
+                    });
+                }
+
+                output.innerHTML += `<p class="success">📋 Extracted ${movesICCS.length} ICCS moves, ${movesChinese.length} Chinese moves</p>`;
+
+                // Step 5: Create game record with REAL move data
+                const gameEndTime = gameData.finishedAt || Date.now();
+                const gameStartTime = gameData.startedAt || gameEndTime;
+                const gameId = `RECOVERED_REAL_${gameEndTime}`;
+
+                const gameRecord = {
+                    gameId: gameId,
+                    tableId: TABLE_ID,
+                    regionId: REGION_ID,
+                    playerRed: { uid: redUid, playerName: redName },
+                    playerBlack: { uid: blackUid, playerName: blackName },
+                    winner: winner,
+                    reason: reason,
+                    completedAt: gameEndTime,
+                    startedAt: gameStartTime,
+                    movesICCS: movesICCS,
+                    movesChinese: movesChinese,
+                    fenStart: "rnbakabnr/9/1c5c1/p1p1p1p1p/9/9/P1P1P1P1P/1C5C1/9/RNBAKABNR w - - 0 1",
+                    totalMoves: totalMoves,
+                    duration: gameEndTime - gameStartTime,
+                    source: "pc",
+                    recovered: true,
+                    recoveryNote: "Game recovered with real move data. saveGameToHistory failed due to missing player data bug (now fixed).",
+                    // Include raw history for reference
+                    rawHistory: history,
+                    eloChanges: {
+                        red: { oldRating: eloChanges.red.oldRating, newRating: eloChanges.red.newRating, change: eloChanges.red.change },
+                        black: { oldRating: eloChanges.black.oldRating, newRating: eloChanges.black.newRating, change: eloChanges.black.change }
+                    }
+                };
+
+                // Step 6: Delete old broken recovery record (with 0 moves) if it exists
+                output.innerHTML += '<p class="info">🗑️ Checking for old broken recovery records...</p>';
+
+                // Check red player's history for old RECOVERED_ records
+                const redHistoryCol = collection(db, 'artifacts', appId, 'users', redUid, 'game-history');
+                const redHistorySnap = await getDocs(redHistoryCol);
+                let deletedCount = 0;
+
+                for (const d of redHistorySnap.docs) {
+                    if (d.id.startsWith('RECOVERED_') && !d.id.startsWith('RECOVERED_REAL_')) {
+                        const data = d.data();
+                        if (data.tableId === TABLE_ID && (data.totalMoves === 0 || !data.totalMoves)) {
+                            try {
+                                await deleteDoc(d.ref);
+                                deletedCount++;
+                                output.innerHTML += `<p class="info">🗑️ Deleted broken record ${d.id} from red player</p>`;
+                            } catch (e) {
+                                output.innerHTML += `<p class="warning">⚠️ Could not delete ${d.id}: ${e.message} (will continue)</p>`;
+                            }
+                        }
+                    }
+                }
+
+                const blackHistoryCol = collection(db, 'artifacts', appId, 'users', blackUid, 'game-history');
+                const blackHistorySnap = await getDocs(blackHistoryCol);
+
+                for (const d of blackHistorySnap.docs) {
+                    if (d.id.startsWith('RECOVERED_') && !d.id.startsWith('RECOVERED_REAL_')) {
+                        const data = d.data();
+                        if (data.tableId === TABLE_ID && (data.totalMoves === 0 || !data.totalMoves)) {
+                            try {
+                                await deleteDoc(d.ref);
+                                deletedCount++;
+                                output.innerHTML += `<p class="info">🗑️ Deleted broken record ${d.id} from black player</p>`;
+                            } catch (e) {
+                                output.innerHTML += `<p class="warning">⚠️ Could not delete ${d.id}: ${e.message} (will continue)</p>`;
+                            }
+                        }
+                    }
+                }
+
+                // Also try to clean centralized history (may fail if not admin - that's OK)
+                try {
+                    const centralCol = collection(db, 'artifacts', appId, 'public', 'data', 'all-game-history');
+                    const centralSnap = await getDocs(centralCol);
+                    for (const d of centralSnap.docs) {
+                        if (d.id.startsWith('RECOVERED_') && !d.id.startsWith('RECOVERED_REAL_')) {
+                            const data = d.data();
+                            if (data.tableId === TABLE_ID && (data.totalMoves === 0 || !data.totalMoves)) {
+                                try {
+                                    await deleteDoc(d.ref);
+                                    deletedCount++;
+                                    output.innerHTML += `<p class="info">🗑️ Deleted broken record ${d.id} from centralized history</p>`;
+                                } catch (e) {
+                                    output.innerHTML += `<p class="warning">⚠️ Could not delete ${d.id} from central: ${e.message} (will continue)</p>`;
+                                }
+                            }
+                        }
+                    }
+                } catch (e) {
+                    output.innerHTML += `<p class="warning">⚠️ Could not scan centralized history: ${e.message} (continuing anyway)</p>`;
+                }
+
+                if (deletedCount > 0) {
+                    output.innerHTML += `<p class="success">✅ Cleaned up ${deletedCount} broken recovery records</p>`;
+                } else {
+                    output.innerHTML += `<p class="info">ℹ️ No broken recovery records found to clean up</p>`;
+                }
+
+                // Step 7: Save to centralized history
+                const centralRef = doc(db, 'artifacts', appId, 'public', 'data', 'all-game-history', gameId);
+                await setDoc(centralRef, gameRecord);
+                output.innerHTML += '<p class="success">✅ Saved to centralized game history</p>';
+
+                // Step 8: Save to per-player history
+                const redHistoryRef = doc(db, 'artifacts', appId, 'users', redUid, 'game-history', gameId);
+                const blackHistoryRef = doc(db, 'artifacts', appId, 'users', blackUid, 'game-history', gameId);
+                await setDoc(redHistoryRef, gameRecord);
+                await setDoc(blackHistoryRef, gameRecord);
+                output.innerHTML += '<p class="success">✅ Saved to both players\' personal history</p>';
+
+                // Step 9: Update profiles with new ELO
+                await setDoc(redProfileRef, {
+                    elo: eloChanges.red.newRating,
+                    gamesPlayed: redGamesPlayed + 1,
+                    lastGameAt: gameEndTime
+                }, { merge: true });
+
+                await setDoc(blackProfileRef, {
+                    elo: eloChanges.black.newRating,
+                    gamesPlayed: blackGamesPlayed + 1,
+                    lastGameAt: gameEndTime
+                }, { merge: true });
+                output.innerHTML += '<p class="success">✅ Updated both player profiles with new ELO</p>';
+
+                // Step 10: Update leaderboard
+                const leaderboardRef = doc(db, 'artifacts', appId, 'leaderboard', 'rankings');
+                const lbSnap = await getDoc(leaderboardRef);
+                if (lbSnap.exists()) {
+                    let players = lbSnap.data().players || [];
+
+                    const rIdx = players.findIndex(p => p.uid === redUid);
+                    if (rIdx >= 0) {
+                        players[rIdx].elo = eloChanges.red.newRating;
+                        players[rIdx].gamesPlayed = redGamesPlayed + 1;
+                        players[rIdx].losses = (players[rIdx].losses || 0) + 1;
+                        players[rIdx].lastGameAt = gameEndTime;
+                    }
+
+                    const bIdx = players.findIndex(p => p.uid === blackUid);
+                    if (bIdx >= 0) {
+                        players[bIdx].elo = eloChanges.black.newRating;
+                        players[bIdx].gamesPlayed = blackGamesPlayed + 1;
+                        players[bIdx].wins = (players[bIdx].wins || 0) + 1;
+                        players[bIdx].lastGameAt = gameEndTime;
+                    }
+
+                    players.sort((a, b) => b.elo - a.elo);
+
+                    await setDoc(leaderboardRef, {
+                        players: players,
+                        updatedAt: Date.now(),
+                        totalPlayers: players.length
+                    });
+                    output.innerHTML += '<p class="success">✅ Leaderboard updated</p>';
+                }
+
+                output.innerHTML += `<p class="success" style="font-size: 20px; margin-top: 20px;">🎉 GAME RECOVERED SUCCESSFULLY WITH ${totalMoves} MOVES!</p>`;
+                output.innerHTML += `<p class="info">
+                    <strong>Summary:</strong><br>
+                    • ${redName} (Red): ${redCurrentELO} → ${eloChanges.red.newRating} (${eloSystem.formatELOChange(eloChanges.red.change)})<br>
+                    • ${blackName} (Black): ${blackCurrentELO} → ${eloChanges.black.newRating} (${eloSystem.formatELOChange(eloChanges.black.change)})<br>
+                    • Winner: ${winner === 'red' ? redName : blackName} (${winner}) by ${reason}<br>
+                    • Total moves: ${totalMoves}<br>
+                    • ICCS moves recorded: ${movesICCS.length}<br>
+                    • Old broken records cleaned: ${deletedCount}
+                </p>`;
+
+            } catch (error) {
+                output.innerHTML += `<p class="error">❌ Error: ${error.message}</p>`;
+                console.error(error);
+            }
+        };
+    </script>
+</body>
+</html>

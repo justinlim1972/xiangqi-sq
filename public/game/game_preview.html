@@ -416,6 +416,66 @@ import { getFirestore, doc, getDoc } from "https://www.gstatic.com/firebasejs/11
 import { XQEngine } from "./xq-engine.js?v=1769513893";
 import { XQUI } from "./xq-ui.js?v=1769513893";
 
+// ── Notation helper ───────────────────────────────────────────────────────────
+// Generates correct Chinese Xiangqi notation from a move object + board state.
+// Always derived from board coordinates — never from stored movesChinese strings.
+function moveToChineseNotation(move, board) {
+    const { from, to, piece } = move;
+    if (!piece || from == null || to == null) return '?';
+
+    const isRed = piece === piece.toUpperCase();
+    const pieceUpper = piece.toUpperCase();
+
+    const redNames   = { R:'车', H:'马', N:'马', E:'相', A:'仕', K:'帅', C:'炮', P:'兵' };
+    const blackNames = { R:'车', H:'马', N:'马', E:'象', A:'士', K:'将', C:'炮', P:'卒' };
+    const pieceName  = isRed ? (redNames[pieceUpper] || piece) : (blackNames[pieceUpper] || piece);
+
+    // File numbers: Red right-to-left (9−x), Black left-to-right (x+1)
+    const fileNum  = col => isRed ? (9 - col) : (col + 1);
+    const fromFile = fileNum(from.x);
+    const toFile   = fileNum(to.x);
+
+    const chNums = ['','一','二','三','四','五','六','七','八','九'];
+
+    let direction, distNum;
+    const isOblique = (pieceUpper === 'H' || pieceUpper === 'N' || pieceUpper === 'E');
+
+    if (from.y === to.y) {
+        // Pure horizontal move
+        direction = '平';
+        distNum   = toFile;
+    } else if (from.x === to.x) {
+        // Pure vertical move
+        const adv = isRed ? (to.y < from.y) : (to.y > from.y);
+        direction = adv ? '进' : '退';
+        distNum   = Math.abs(to.y - from.y);
+    } else {
+        // Oblique (Horse / Elephant) — use destination file as the number
+        const adv = isRed ? (to.y < from.y) : (to.y > from.y);
+        direction = adv ? '进' : '退';
+        distNum   = toFile;
+    }
+
+    // Disambiguation: two same-type pieces on same column → 前/后
+    let prefix = chNums[fromFile] || String(fromFile);
+    if (board) {
+        const twins = [];
+        for (let row = 0; row < 10; row++) {
+            const cell = board[row]?.[from.x];
+            if (cell && cell === piece && row !== from.y) twins.push(row);
+        }
+        if (twins.length > 0) {
+            const otherRow = twins[0];
+            const isFront  = isRed ? (from.y < otherRow) : (from.y > otherRow);
+            prefix = isFront ? '前' : '后';
+        }
+    }
+
+    const distCn = chNums[distNum] || String(distNum);
+    return `${pieceName}${prefix}${direction}${distCn}`;
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 class GamePreviewApp {
     constructor() {
         const config = {
@@ -511,14 +571,25 @@ class GamePreviewApp {
                           game.winner === 'in-progress' ? 'In Progress' :
                           game.winner ? `${game.winner.toUpperCase()} wins` : 'Unknown';
 
+        // Regenerate correct Chinese notation from movesICCS (source of truth).
+        // movesChinese stored in Firestore may contain legacy bad data — ignore it.
         let movesHtml = '';
-        game.movesChinese.forEach((move, index) => {
-            const moveNum = Math.floor(index / 2) + 1;
+        let notationBoard = this.engine.init();
+        (game.movesICCS || []).forEach((iccs, index) => {
+            const from  = this.parseICCS(iccs.substring(0, 2));
+            const to    = this.parseICCS(iccs.substring(2, 4));
+            const piece = notationBoard[from.y][from.x];
+            const displayMove = moveToChineseNotation({ from, to, piece }, notationBoard);
+            // Advance the running board
+            notationBoard[to.y][to.x] = notationBoard[from.y][from.x];
+            notationBoard[from.y][from.x] = null;
+
+            const moveNum  = Math.floor(index / 2) + 1;
             const isRedMove = index % 2 === 0;
             movesHtml += `
                 <div class="move-item" onclick="app.showMove(${index})">
                     <span class="move-number">${moveNum}.${isRedMove ? '' : '..'}</span>
-                    <span class="move-notation">${move}</span>
+                    <span class="move-notation">${displayMove}</span>
                 </div>
             `;
         });
